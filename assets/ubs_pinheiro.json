@@ -1,0 +1,11 @@
+{
+"type": "FeatureCollection",
+"name": "ubs_pinheiro",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::4979" } },
+"features": [
+{ "type": "Feature", "properties": { "name": "UBS Kiola Sarney" }, "geometry": { "type": "Point", "coordinates": [ -45.099001, -2.534273, 0.0 ] } },
+{ "type": "Feature", "properties": { "name": "UBS São José" }, "geometry": { "type": "Point", "coordinates": [ -45.096876000983997, -2.526786999321433, 0.0 ] } },
+{ "type": "Feature", "properties": { "name": "UBS Pacas" }, "geometry": { "type": "Point", "coordinates": [ -45.146545, -2.551517, 0.0 ] } },
+{ "type": "Feature", "properties": { "name": "UBS Coco" }, "geometry": { "type": "Point", "coordinates": [ -45.134465199486193, -2.693829899924487, 0.0 ] } }
+]
+}

@@ -1,0 +1,43 @@
+# ================================================================
+# NUNCA enviar para o GitHub
+# ================================================================
+
+# Credenciais (chave do Google e ID da planilha)
+.streamlit/secrets.toml
+*service-account*.json
+credenciais*.json
+# chave .json baixada do Google Cloud na raiz do projeto
+# (os .json de assets/, como pinheiro.json e ubs_pinheiro.json, continuam no GitHub)
+/*.json
+
+# Dados de notificação (têm endereço, ficha e dados de saúde)
+*.xlsx
+*.xls
+*.csv
+
+# Relatórios e exportações baixados do painel
+*.pdf
+
+# ================================================================
+# Versões antigas e anotações pessoais (ficam só no seu computador)
+# ================================================================
+Passo8_PET_DASH_MARK1.py
+Passo8_PET_DASH_MARK2.py
+Passo8_PET_DASH_MARK3.py
+Passo8_PET_DASH_MARK4.py
+Resolucao_Problema_Git.txt
+etc/
+
+# ================================================================
+# Arquivos do computador / Python
+# ================================================================
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
