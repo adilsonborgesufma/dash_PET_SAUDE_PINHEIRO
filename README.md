@@ -1,4 +1,4 @@
-# Dashboard UBS – Pinheiro/MA
+# Dashboard UBS – Pinheiro, Maranhão
 
 Painel de Vigilância Epidemiológica de **Dengue, Chikungunya e Zika** do município de Pinheiro (MA), com a distribuição espacial dos casos e das Unidades Básicas de Saúde (UBS).
 
