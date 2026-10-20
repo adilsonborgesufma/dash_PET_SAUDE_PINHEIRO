@@ -111,19 +111,17 @@ def renderizar_visao_geral(df, populacao):
     st.markdown("")
     tabela = pd.crosstab(df["Ano"], df["Tipo_Caso"]).reindex(anos, fill_value=0)
     fig = go.Figure()
+    # Barras lado a lado (uma por agravo), cada uma com o seu número em cima:
+    # assim um agravo com poucos casos não fica escondido embaixo de outro.
     for agravo in tabela.columns:
         fig.add_bar(
             x=[str(a) for a in anos], y=tabela[agravo], name=agravo,
             marker_color=_cor_agravo(agravo),
+            text=[_num(v) if v else "" for v in tabela[agravo]], textposition="outside",
             hovertemplate=f"<b>{agravo}</b><br>Ano: %{{x}}<br>Casos: %{{y}}<extra></extra>",
         )
-    totais = tabela.sum(axis=1)
-    fig.add_scatter(
-        x=[str(a) for a in anos], y=totais, mode="text", text=[_num(t) for t in totais],
-        textposition="top center", showlegend=False, hoverinfo="skip", cliponaxis=False,
-    )
-    fig.update_layout(barmode="stack")
-    _layout(fig, "Casos por ano e agravo", "Ano", maximo=totais.max())
+    fig.update_layout(barmode="group")
+    _layout(fig, "Casos por ano e agravo", "Ano", maximo=tabela.max().max())
     _plotar(fig, "visao_geral_ano_agravo")
 
 
