@@ -39,6 +39,7 @@ from reportlab.platypus import (  # noqa: E402
     TableStyle,
 )
 
+from modules.comparacao_mapas import config_comparacao_do_painel, figura_comparacao_anos  # noqa: E402
 from modules.creditos import (  # noqa: E402
     DESENVOLVIMENTO,
     EQUIPE,
@@ -77,6 +78,12 @@ AZUL_CLARO = colors.HexColor("#E8EAFE")
 CINZA = colors.HexColor("#5F6368")
 CINZA_LINHA = colors.HexColor("#D0D4DC")
 LARGURA_UTIL = A4[0] - 4 * cm
+TEXTO_MAPAS_CALOR = (
+    "Mesmos mapas da comparação entre anos do painel (aba Mapa Geral). Cada mancha mostra onde os casos "
+    "se concentraram: tons frios indicam poucos casos por perto e tons quentes, muitos casos próximos uns "
+    "dos outros. Todos os anos usam a mesma escala de cores, então dá para comparar um ano com outro. "
+    "Os círculos azul-escuros são as UBS e a linha cinza é o limite do município."
+)
 
 # =====================================================================
 # IDENTIDADE DO PROJETO (logos e créditos impressos em todo relatório)
@@ -374,71 +381,6 @@ def grafico_variavel(analise):
     return fig
 
 
-def mapa_densidade(df, municipio_gdf, ubs_gdf):
-    """Município inteiro + área ampliada com 90% dos casos, em hexágonos (sem pontos individuais)."""
-    pontos = df[["Longitude", "Latitude"]].dropna()
-    limite = None
-    if municipio_gdf is not None and not municipio_gdf.empty:
-        limite = municipio_gdf.to_crs(epsg=4326) if municipio_gdf.crs else municipio_gdf
-    if limite is not None:
-        minx, miny, maxx, maxy = limite.total_bounds
-    else:
-        minx, miny = pontos.min()
-        maxx, maxy = pontos.max()
-
-    if len(pontos) >= 5:
-        zx0, zx1 = pontos["Longitude"].quantile([0.05, 0.95])
-        zy0, zy1 = pontos["Latitude"].quantile([0.05, 0.95])
-    else:
-        zx0, zy0, zx1, zy1 = minx, miny, maxx, maxy
-    lado = max(zx1 - zx0, zy1 - zy0, 0.01) * 0.6
-    cx, cy = (zx0 + zx1) / 2, (zy0 + zy1) / 2
-    zoom_ext = (cx - lado, cx + lado, cy - lado, cy + lado)
-
-    ubs_pts = None
-    if ubs_gdf is not None and not ubs_gdf.empty:
-        try:
-            ubs = ubs_gdf.to_crs(epsg=4326) if ubs_gdf.crs else ubs_gdf
-            ubs_pts = ubs.geometry.representative_point()
-        except Exception:
-            ubs_pts = None
-
-    fig, eixos = plt.subplots(1, 2, figsize=(11, 5.4))
-    hb = None
-    for ax, (x0, x1, y0, y1), grade, titulo in (
-        (eixos[0], (minx, maxx, miny, maxy), 28, "Município inteiro"),
-        (eixos[1], zoom_ext, 22, "Área com maior concentração (ampliada)"),
-    ):
-        if limite is not None:
-            limite.plot(ax=ax, facecolor="#F1F8E9", edgecolor="#2E7D32", linewidth=1.2)
-        dentro = pontos[pontos["Longitude"].between(x0, x1) & pontos["Latitude"].between(y0, y1)]
-        if len(dentro):
-            hb = ax.hexbin(dentro["Longitude"], dentro["Latitude"], gridsize=grade, mincnt=1,
-                           extent=(x0, x1, y0, y1), cmap="YlOrRd", linewidths=0.2, edgecolors="white")
-        if ubs_pts is not None:
-            ax.scatter(ubs_pts.x, ubs_pts.y, marker="P", s=45, color="#1A237E",
-                       edgecolor="white", linewidth=0.6, label="UBS", zorder=5)
-        ax.set_xlim(x0, x1)
-        ax.set_ylim(y0, y1)
-        ax.set_aspect("equal")
-        ax.set_title(titulo, fontsize=10, color="#3C4043")
-        ax.set_xlabel("")
-        ax.set_ylabel("")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for borda in ax.spines.values():
-            borda.set_color("#D0D4DC")
-    eixos[0].add_patch(plt.Rectangle((zoom_ext[0], zoom_ext[2]), zoom_ext[1] - zoom_ext[0],
-                                     zoom_ext[3] - zoom_ext[2], fill=False, edgecolor="#0400EC", linewidth=1.2))
-    if ubs_pts is not None:
-        eixos[1].legend(frameon=True, fontsize=8, loc="lower right")
-    if hb is not None:
-        barra = fig.colorbar(hb, ax=eixos, shrink=0.7, pad=0.02)
-        barra.set_label("Casos por hexágono", fontsize=8)
-        barra.ax.tick_params(labelsize=7)
-    return fig
-
-
 # =====================================================================
 # RESUMO GERAL
 # =====================================================================
@@ -510,7 +452,7 @@ def _imagem(fig, largura=LARGURA_UTIL):
 
 
 def gerar_pdf(df, populacao, filtros_texto, variaveis, comparacao, incluir_mapa,
-              municipio_gdf=None, ubs_gdf=None, info_dados=None):
+              municipio_gdf=None, ubs_gdf=None, info_dados=None, anos_mapa=None, config_mapa=None):
     info_dados = info_dados or {}
     e = _estilos()
     agora = datetime.now()
@@ -572,11 +514,14 @@ def gerar_pdf(df, populacao, filtros_texto, variaveis, comparacao, incluir_mapa,
 
     if incluir_mapa:
         h.append(PageBreak())
-        h.append(Paragraph(f"{len(variaveis) + 1}. Distribuição espacial", e["h1"]))
-        h.append(_imagem(mapa_densidade(df, municipio_gdf, ubs_gdf)))
-        h.append(Paragraph("Cada hexágono agrega os casos localizados dentro dele (mais escuro = mais casos). "
-                           "O retângulo azul indica a área ampliada. A localização individual dos casos não é "
-                           "exibida por se tratar de dados de saúde.", e["nota"]))
+        h.append(Paragraph(f"{len(variaveis) + 1}. Mapas de calor por ano", e["h1"]))
+        fig_mapas = (figura_comparacao_anos(df, municipio_gdf, ubs_gdf, anos=anos_mapa, config=config_mapa)
+                     if anos_mapa is None or len(anos_mapa) else None)
+        if fig_mapas is not None:
+            h.append(_imagem(fig_mapas))
+            h.append(Paragraph(TEXTO_MAPAS_CALOR, e["nota"]))
+        else:
+            h.append(Paragraph("Não há casos com coordenadas para os anos escolhidos.", e["corpo"]))
 
     h.append(Paragraph("Nota metodológica", e["h1"]))
     for frase in (
@@ -636,9 +581,10 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
     # nunca entrega um PDF antigo guardado em cache depois de uma atualização.
     @st.cache_data(show_spinner=False, max_entries=8)
     def _pdf_em_cache(_df, assinatura_df, populacao, filtros_itens, variaveis, comparacao, incluir_mapa,
-                      _municipio, _ubs, _info, versao):
+                      _municipio, _ubs, _info, versao, anos_mapa=None, config_mapa_itens=()):
         return gerar_pdf(_df, populacao, dict(filtros_itens), list(variaveis), comparacao, incluir_mapa,
-                         _municipio, _ubs, _info)
+                         _municipio, _ubs, _info, anos_mapa=list(anos_mapa),
+                         config_mapa=dict(config_mapa_itens))
 
     st.header("📑 Relatório personalizado")
     st.caption("Escolha as variáveis. O relatório abaixo se atualiza na hora, junto com os filtros da barra "
@@ -659,7 +605,7 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
         help="Separa cada variável pelas categorias desta (ex.: cada gráfico dividido por Gênero).",
     )
     comparacao = None if comparacao == "Nenhuma" else comparacao
-    incluir_mapa = col_c.checkbox("Incluir mapa", True, key=f"{key_prefix}_mapa")
+    incluir_mapa = col_c.checkbox("Incluir mapas de calor", True, key=f"{key_prefix}_mapa")
 
     # ---------- resumo
     resumo = resumo_geral(df, populacao)
@@ -686,11 +632,24 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
         st.divider()
 
     if incluir_mapa:
-        st.subheader(f"{len(variaveis) + 1}. Distribuição espacial")
-        fig = mapa_densidade(df, municipio_gdf, ubs_gdf)
-        st.pyplot(fig, use_container_width=True)
-        plt.close(fig)
-        st.caption("Hexágonos agregam os casos (mais escuro = mais casos); a localização individual não é exibida.")
+        st.subheader(f"{len(variaveis) + 1}. Mapas de calor por ano")
+        anos_disponiveis = [int(a) for a in sorted(df.dropna(subset=["Latitude", "Longitude"])["Ano"].unique())]
+        anos_mapa = st.multiselect(
+            "Anos nos mapas", anos_disponiveis, default=anos_disponiveis, key=f"{key_prefix}_anos_mapa",
+            help="Escolha os anos para comparar. A escala de cores é a mesma do painel e vale para todos os anos.",
+        )
+        # mesma aparência escolhida na comparação entre anos da aba Mapa Geral
+        config_mapa = config_comparacao_do_painel(st.session_state)
+        fig = figura_comparacao_anos(df, municipio_gdf, ubs_gdf, anos=anos_mapa, config=config_mapa) if anos_mapa else None
+        if fig is not None:
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
+            st.caption(TEXTO_MAPAS_CALOR)
+        else:
+            st.info("Escolha pelo menos um ano com casos para ver os mapas.")
+
+    if not incluir_mapa:
+        anos_mapa, config_mapa = [], {}
 
     # ---------- PDF com exatamente o que está na tela
     assinatura_df = str(pd.util.hash_pandas_object(df, index=False).sum())
@@ -699,7 +658,10 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
                             tuple(variaveis), comparacao, incluir_mapa, municipio_gdf, ubs_gdf, info_dados,
                             versao=(os.path.getmtime(os.path.abspath(__file__)),
                                     os.path.getmtime(os.path.join(os.path.dirname(os.path.abspath(__file__)), "creditos.py")),
-                                    versao_logos()))
+                                    versao_logos(),
+                                    os.path.getmtime(os.path.join(os.path.dirname(os.path.abspath(__file__)), "comparacao_mapas.py"))),
+                            anos_mapa=tuple(anos_mapa) if incluir_mapa else (),
+                            config_mapa_itens=tuple(sorted(config_mapa.items())) if incluir_mapa else ())
     st.download_button(
         "📥 Baixar este relatório em PDF", data=pdf,
         file_name=f"relatorio_pinheiro_{datetime.now():%Y%m%d_%H%M}.pdf",

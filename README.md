@@ -29,7 +29,7 @@ Desenvolvido no **Programa de Educação pelo Trabalho para a Saúde: Informaç�
 
 - Só são lidas as colunas usadas no painel. Endereço, logradouro, bairro e número da ficha são descartados no momento da leitura.
 - Os popups do mapa mostram localização arredondada (~110 m) e faixa etária em vez da idade exata.
-- O relatório em PDF mostra a densidade em hexágonos, sem a localização individual dos casos.
+- O relatório em PDF mostra mapas de calor por ano (os mesmos da comparação entre anos do painel), sem a localização individual dos casos.
 - Nenhum dado de paciente, planilha ou credencial fica neste repositório (veja `.gitignore`).
 
 ## Regras de contagem
