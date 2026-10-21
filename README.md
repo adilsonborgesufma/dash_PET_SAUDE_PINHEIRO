@@ -8,6 +8,15 @@ Desenvolvido no **Programa de Educação pelo Trabalho para a Saúde: Informaç�
 
 ---
 
+## Dois painéis, uma base
+
+| Arquivo | Para quem | Localização dos casos |
+|---|---|---|
+| `Passo8_PET_DASH_MARK5.py` | Vigilância Epidemiológica (acesso restrito por e-mail) | Coordenadas das notificações (rua) |
+| `Painel_Arboviroses_Pinheiro.py` | População (consulta pública) | Só o **bairro**: cada caso vai para o ponto de referência do bairro (`assets/bairros_pinheiro.csv`). Não lê latitude/longitude, não mostra registros individuais nem o link da planilha |
+
+Os dois leem a mesma Google Planilha. No painel público, Zona Rural e notificações sem bairro ficam fora do mapa, mas entram em todas as contagens. Os pontos dos bairros podem ser corrigidos pela Vigilância em `assets/bairros_pinheiro.csv` (`Bairro;Latitude;Longitude;Observacao`).
+
 ## O que o painel faz
 
 | Aba | Conteúdo |
@@ -43,13 +52,17 @@ Desenvolvido no **Programa de Educação pelo Trabalho para a Saúde: Informaç�
 ## Estrutura
 
 ```
-Passo8_PET_DASH_MARK5.py      arquivo principal (Streamlit)
+Passo8_PET_DASH_MARK5.py      painel da Vigilância (Streamlit)
+Painel_Arboviroses_Pinheiro.py painel público, por bairro (Streamlit)
 modules/
   config.py                   constantes (cores, população de referência)
   dados.py                    leitura dos dados geográficos (município e UBS)
   graficos.py                 indicadores e gráficos
   comparacao_mapas.py         mapas de calor por ano, com escala comum
   relatorio_detalhado.py      aba Relatório e PDF
+  camadas_exames.py           mapa de calor do RT-PCR positivo e bairros prioritários
+  bairros.py                  pontos dos bairros (painel público)
+  creditos.py                 textos de créditos (Sistema, Equipe...)
   exportacao.py               tabela de UBS e downloads
 assets/                       limites geográficos (GeoJSON) e logos
 requirements.txt              bibliotecas Python
