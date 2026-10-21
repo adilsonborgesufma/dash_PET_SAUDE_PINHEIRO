@@ -1,14 +1,12 @@
 """
-Camadas por exame no Mapa Geral e ranking de bairros prioritários.
+Mapa de calor do RT-PCR de dengue positivo (coluna RTPCRDE) e ranking de bairros.
 
-Cada categoria (RT-PCR de dengue positivo, NS1 positivo, Dengue confirmado) pode
-ser ligada sozinha no mapa, como mapa de calor, marcadores ou os dois. As camadas
-usam TODAS as notificações com o exame positivo, mesmo as que ainda não têm
-classificação final: um RT-PCR positivo já confirma a infecção e é o sinal mais
-rápido para orientar ações de controle vetorial.
+A camada usa TODAS as notificações com RT-PCR de dengue positivo, mesmo as que
+ainda não têm classificação final: o RT-PCR positivo já confirma a infecção e é o
+sinal mais rápido para orientar ações de controle vetorial.
 
-O ranking de bairros soma, por bairro, os casos de cada categoria. Ele inclui
-também as notificações sem latitude/longitude, porque o bairro vem da ficha.
+O ranking de bairros soma os casos RT-PCR positivos por bairro. Ele inclui também
+as notificações sem latitude/longitude, porque o bairro vem da ficha.
 """
 import unicodedata
 
@@ -23,16 +21,6 @@ CATEGORIAS_EXAME = {
         "coluna": "RTPCRDE", "valor": "Positivo", "cor": "#6A1B9A", "raio_marcador": 4,
         "gradiente": {"0.2": "#F3E5F5", "0.4": "#CE93D8", "0.6": "#AB47BC", "0.8": "#7B1FA2", "1.0": "#4A148C"},
         "curto": "RT-PCR+",
-    },
-    "NS1 positivo": {
-        "coluna": "RNS1", "valor": "Positivo", "cor": "#0277BD", "raio_marcador": 6,
-        "gradiente": {"0.2": "#E1F5FE", "0.4": "#81D4FA", "0.6": "#29B6F6", "0.8": "#0288D1", "1.0": "#01579B"},
-        "curto": "NS1+",
-    },
-    "Dengue confirmado": {
-        "classificacao": "dengue", "cor": "#C62828", "raio_marcador": 8,
-        "gradiente": {"0.2": "#FFEBEE", "0.4": "#EF9A9A", "0.6": "#E57373", "0.8": "#E53935", "1.0": "#B71C1C"},
-        "curto": "Dengue confirmado",
     },
 }
 SEM_BAIRRO = "(bairro não informado)"
@@ -68,70 +56,44 @@ def padronizar_bairros(serie):
 
 # ======================= mapa =======================
 
-def adicionar_camadas_exame(mapa, df, categorias, mostrar_calor, mostrar_marcadores, raio, desfoque):
-    """Uma camada por categoria (liga/desliga também pelo botão de camadas do mapa)."""
+def adicionar_camadas_exame(mapa, df, categorias, raio, desfoque):
+    """Mapa de calor de cada categoria (liga/desliga também pelo botão de camadas do mapa)."""
     contagem = {}
     if df is None or df.empty:
         return contagem
-    # Desenha do maior para o menor marcador: num mesmo ponto os círculos ficam concêntricos
-    ordem = sorted(categorias, key=lambda n: -CATEGORIAS_EXAME[n]["raio_marcador"])
-    for nome in ordem:
+    for nome in categorias:
         regra = CATEGORIAS_EXAME[nome]
         dados = df[mascara_categoria(df, nome)].dropna(subset=["Latitude", "Longitude"])
         contagem[nome] = len(dados)
         if dados.empty:
             continue
-        if mostrar_calor:
-            camada = folium.FeatureGroup(name=f"🔥 {nome}", show=True)
-            HeatMap(
-                dados[["Latitude", "Longitude"]].values.tolist(),
-                radius=raio, blur=desfoque, min_opacity=0.3, gradient=regra["gradiente"],
-            ).add_to(camada)
-            camada.add_to(mapa)
-        if mostrar_marcadores:
-            camada = folium.FeatureGroup(name=f"📍 {nome}", show=True)
-            for _, linha in dados.iterrows():
-                lat, lon = float(linha["Latitude"]), float(linha["Longitude"])
-                partes = [f"<b>{nome}</b>", f"Bairro: {linha.get('Bairro') or SEM_BAIRRO}",
-                          f"Ano: {linha.get('Ano', '')}", f"Agravo notificado: {linha.get('Tipo_Caso', '')}"]
-                if "RNS1" in linha:
-                    partes.append(f"NS1: {linha['RNS1']}")
-                if "RTPCRDE" in linha:
-                    partes.append(f"RT-PCR: {linha['RTPCRDE']}")
-                if linha.get("Classificacao"):
-                    partes.append(f"Classificação: {linha['Classificacao']}")
-                partes.append(f"Localização aprox.: {round(lat, 3)}, {round(lon, 3)}")
-                folium.CircleMarker(
-                    location=[lat, lon], radius=regra["raio_marcador"],
-                    color=regra["cor"], weight=2, fill=True, fill_color=regra["cor"], fill_opacity=0.55,
-                    popup=folium.Popup("<br>".join(partes), max_width=280),
-                    tooltip=f"{regra['curto']} · {linha.get('Bairro') or SEM_BAIRRO} · {linha.get('Ano', '')}",
-                ).add_to(camada)
-            camada.add_to(mapa)
+        camada = folium.FeatureGroup(name=f"🔥 {nome}", show=True)
+        HeatMap(
+            dados[["Latitude", "Longitude"]].values.tolist(),
+            radius=raio, blur=desfoque, min_opacity=0.3, gradient=regra["gradiente"],
+        ).add_to(camada)
+        camada.add_to(mapa)
     return contagem
 
 
-def adicionar_legenda_camadas(mapa, categorias, contagem, mostrar_calor, mostrar_marcadores):
+def adicionar_legenda_camadas(mapa, categorias, contagem):
     itens = ""
     for nome in categorias:
         regra = CATEGORIAS_EXAME[nome]
         paradas = ", ".join(f"{cor} {float(p) * 100:.0f}%" for p, cor in regra["gradiente"].items())
-        amostra_calor = (f'<span style="display:inline-block;width:34px;height:9px;border-radius:3px;'
-                         f'background:linear-gradient(to right,{paradas});border:1px solid #999;'
-                         f'margin-right:6px;"></span>') if mostrar_calor else ""
-        amostra_ponto = (f'<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
-                         f'background:{regra["cor"]};opacity:.8;border:2px solid {regra["cor"]};'
-                         f'margin-right:6px;"></span>') if mostrar_marcadores else ""
-        itens += (f'<div style="display:flex;align-items:center;margin:3px 0;font-size:12px;color:#222;">'
-                  f'{amostra_ponto}{amostra_calor}{nome} ({contagem.get(nome, 0)})</div>')
+        itens += (f'<div style="font-size:12px;color:#222;margin:2px 0 3px 0;">{nome} '
+                  f'({contagem.get(nome, 0)} casos)</div>'
+                  f'<div style="width:160px;height:10px;border-radius:4px;'
+                  f'background:linear-gradient(to right,{paradas});border:1px solid #999;"></div>'
+                  f'<div style="display:flex;justify-content:space-between;width:160px;font-size:10px;'
+                  f'color:#555;"><span>poucos</span><span>muitos</span></div>')
     html_legenda = f"""
     {{% macro html(this, kwargs) %}}
     <div style="position: fixed; bottom: 40px; right: 14px; z-index: 9999; background: white;
                 padding: 8px 12px; border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,.3);
                 font-family: sans-serif;">
-        <div style="font-weight:bold;font-size:13px;margin-bottom:4px;color:#111;">🧪 Camadas por exame</div>
+        <div style="font-weight:bold;font-size:13px;margin-bottom:4px;color:#111;">🧪 Mapa de calor</div>
         {itens}
-        <div style="font-size:10px;color:#777;margin-top:3px;">todas as notificações com o resultado</div>
     </div>
     {{% endmacro %}}
     """
@@ -166,16 +128,12 @@ def renderizar_bairros_prioritarios(df_bairros, anos_marcados, key_prefix="bairr
 
     anos_disponiveis = sorted(int(a) for a in df_bairros["Ano"].dropna().unique())
     anos_marcados = [int(a) for a in anos_marcados if int(a) in anos_disponiveis] or anos_disponiveis
-    c1, c2 = st.columns([2, 3])
-    periodo = c1.radio(
+    criterio = next(iter(CATEGORIAS_EXAME))  # RT-PCR dengue positivo
+    periodo = st.radio(
         "Período", [f"Só {anos_marcados[-1]} (ano mais recente)", "Anos marcados na barra lateral"],
-        key=f"{key_prefix}_periodo", horizontal=False,
+        key=f"{key_prefix}_periodo", horizontal=True,
     )
     anos = [anos_marcados[-1]] if periodo.startswith("Só") else anos_marcados
-    criterio = c2.selectbox(
-        "Ordenar bairros por", list(CATEGORIAS_EXAME), index=0, key=f"{key_prefix}_criterio",
-        help="O RT-PCR positivo confirma a infecção pelo vírus da dengue e indica transmissão recente.",
-    )
 
     dados = df_bairros[df_bairros["Ano"].isin(anos)]
     tabela = tabela_bairros(dados)
@@ -216,10 +174,9 @@ def renderizar_bairros_prioritarios(df_bairros, anos_marcados, key_prefix="bairr
     st.dataframe(tabela, hide_index=True, use_container_width=True, key=f"{key_prefix}_tabela")
     sem_bairro = int(tabela.loc[tabela["Bairro"] == SEM_BAIRRO, "Notificações"].sum())
     st.caption(
-        "Contagem por bairro de **todas as notificações** do período, inclusive as que ainda não têm "
-        "latitude/longitude (o bairro vem da ficha). RT-PCR e NS1: notificações com o exame positivo; "
-        "Dengue confirmado: classificação final Dengue, Dengue com sinais de alarme ou Dengue grave. "
-        "\"Zona Rural\" reúne vários povoados."
+        "Contagem por bairro das notificações com **RT-PCR de dengue positivo** (coluna RTPCRDE) no período, "
+        "inclusive as que ainda não têm latitude/longitude (o bairro vem da ficha). "
+        "\"Notificações\" é o total de notificações do bairro no período. \"Zona Rural\" reúne vários povoados."
         + (f" {sem_bairro} notificação(ões) sem bairro preenchido." if sem_bairro else "")
     )
     st.caption(

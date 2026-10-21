@@ -810,23 +810,17 @@ with st.sidebar:
                     ano_calor = st.select_slider("Ano do mapa de calor", options=anos_calor,
                                                  value=anos_calor[-1], key="ano_calor")
 
-        # ---------------- CAMADAS POR EXAME ----------------
-        st.markdown("**🧪 Camadas por exame**")
-        camadas_exame = st.multiselect(
-            "Mostrar no mapa", list(CATEGORIAS_EXAME), default=[], key="camadas_exame",
-            help="Cada categoria é uma camada independente. Entram todas as notificações com o resultado, "
-                 "mesmo sem classificação final, nos anos marcados acima.",
+        # ---------------- MAPA DE CALOR DO RT-PCR ----------------
+        camada_rtpcr = st.checkbox(
+            "🧪 Mapa de calor: RT-PCR dengue positivo", False, key="camada_rtpcr",
+            help="Coluna RTPCRDE. Entram todas as notificações com RT-PCR positivo, mesmo sem "
+                 "classificação final, nos anos marcados acima.",
         )
-        modo_camadas = "📍🔥 Marcadores + Mapa de Calor"
-        if camadas_exame:
-            modo_camadas = st.radio(
-                "Exibir camadas como",
-                ["🔥 Mapa de Calor", "📍 Marcadores", "📍🔥 Marcadores + Mapa de Calor"],
-                index=2, key="modo_camadas",
-            )
-            st.caption("Desmarque **Mostrar casos no mapa** para ver só as camadas por exame.")
+        camadas_exame = [next(iter(CATEGORIAS_EXAME))] if camada_rtpcr else []
+        if camada_rtpcr:
+            st.caption("Desmarque **Mostrar casos no mapa** para ver só o calor do RT-PCR.")
     else:
-        camadas_exame, modo_camadas = [], ""
+        camadas_exame = []
         mostrar_casos = False
         tipo_visualizacao = "📍 Marcadores"
         agravo_calor, ano_calor = None, None
@@ -1124,7 +1118,7 @@ with aba_mapa:
             else:
                 aviso_calor = f"Nenhum caso de {titulo_calor} com os filtros atuais."
 
-    # ---------------- CAMADAS POR EXAME ----------------
+    # ---------------- MAPA DE CALOR DO RT-PCR ----------------
     contagem_camadas = {}
     if camadas_exame and not df_notificacoes.empty:
         df_camadas = df_notificacoes[df_notificacoes["Ano"].isin(filtros["anos"])]
@@ -1132,12 +1126,9 @@ with aba_mapa:
             df_camadas = df_camadas[df_camadas["Dentro_Municipio"]]
         raio_camadas = max(8, min(60, int(raio_calor * (13 / max(zoom, 1))))) if raio_adaptativo else raio_calor
         contagem_camadas = adicionar_camadas_exame(
-            m, df_camadas, camadas_exame,
-            mostrar_calor="🔥" in modo_camadas, mostrar_marcadores="📍" in modo_camadas,
-            raio=raio_camadas, desfoque=max(raio_camadas // 2, 1),
+            m, df_camadas, camadas_exame, raio=raio_camadas, desfoque=max(raio_camadas // 2, 1),
         )
-        adicionar_legenda_camadas(m, camadas_exame, contagem_camadas,
-                                  "🔥" in modo_camadas, "📍" in modo_camadas)
+        adicionar_legenda_camadas(m, camadas_exame, contagem_camadas)
 
     # ---------------- UBS ----------------
     if not ubs.empty:
@@ -1234,7 +1225,7 @@ with aba_mapa:
     if aviso_calor:
         st.info(f"🔥 {aviso_calor}")
     if camadas_exame and not any(contagem_camadas.values()):
-        st.info("🧪 Nenhuma notificação com coordenada nas camadas por exame escolhidas, nos anos marcados.")
+        st.info("🧪 Nenhuma notificação com RT-PCR positivo e coordenada nos anos marcados.")
 
     if not df_casos.empty:
         st.divider()

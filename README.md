@@ -13,7 +13,7 @@ Desenvolvido no **Programa de Educação pelo Trabalho para a Saúde: Informaç�
 | Aba | Conteúdo |
 |---|---|
 | 📊 **Visão Geral** | Indicadores (total de casos, casos no ano, incidência por 10 mil habitantes), evolução por ano e agravo, perfil dos casos (faixa etária, gênero, exames NS1 e RT-PCR) |
-| 🗺️ **Mapa Geral** | Mapa com limite municipal, UBS e casos (marcadores e/ou mapa de calor por agravo e por ano), camadas por exame (RT-PCR dengue positivo, NS1 positivo, Dengue confirmado), ranking de bairros prioritários, comparação de densidade entre anos, estatísticas e gráficos |
+| 🗺️ **Mapa Geral** | Mapa com limite municipal, UBS e casos (marcadores e/ou mapa de calor por agravo e por ano), mapa de calor do RT-PCR de dengue positivo, ranking de bairros por RT-PCR positivo, comparação de densidade entre anos, estatísticas e gráficos |
 | 🦟 **Filtros de Casos** | Tabela dos casos filtrados e download em CSV |
 | 📑 **Relatório** | Relatório interpretativo com as variáveis escolhidas pelo usuário, com download em PDF |
 
