@@ -51,6 +51,9 @@ from modules.comparacao_mapas import DESLOCAMENTO_REFERENCIA_GRAUS, calcular_pic
 from modules.graficos import renderizar_estatisticas_e_graficos, renderizar_visao_geral
 from modules.exportacao import renderizar_exportacao_rodape, renderizar_tabela_ubs
 from modules.relatorio_detalhado import renderizar_aba_relatorio
+from modules.camadas_exames import (
+    CATEGORIAS_EXAME, adicionar_camadas_exame, adicionar_legenda_camadas, renderizar_bairros_prioritarios,
+)
 from modules.creditos import DESENVOLVIMENTO, EQUIPE, ORIENTACAO, RODAPE_SISTEMA, SOBRE_SISTEMA
 
 # ================= FONTE DE DADOS =================
@@ -181,6 +184,7 @@ APELIDOS_COLUNAS = {
     "rtpcrde": "RTPCRDE",
     "ano": "Ano",
     "data": "Data",
+    "bairro": "Bairro",
 }
 
 
@@ -258,7 +262,8 @@ def padronizar_df_casos(df):
 
     # Mantém SOMENTE as colunas do dashboard. Endereço, bairro, nº da ficha,
     # escolaridade etc. são descartados aqui e não chegam ao mapa nem às exportações.
-    manter = [c for c in list(COLUNAS_EXIBICAO) + ["Faixa_Etaria", "Classificacao"] if c in df.columns]
+    # O bairro é mantido só para o ranking de bairros prioritários (contagem agregada).
+    manter = [c for c in list(COLUNAS_EXIBICAO) + ["Faixa_Etaria", "Classificacao", "Bairro"] if c in df.columns]
     df = df[manter]
 
     return df.reset_index(drop=True), n_descartados
@@ -663,6 +668,9 @@ with st.sidebar:
         st.error(f"❌ Colunas obrigatórias não encontradas na planilha: {', '.join(faltando)}")
         df_casos = pd.DataFrame()
 
+    # Ranking de bairros: usa todas as notificações, mesmo sem coordenada (o bairro vem da ficha)
+    df_notificacoes_bairro = df_casos.copy()
+
     # Trabalha SOMENTE com notificações que têm Latitude E Longitude preenchidas
     n_sem_coordenada = 0
     if not df_casos.empty:
@@ -673,6 +681,8 @@ with st.sidebar:
         df_casos = df_casos[~sem_coordenada].reset_index(drop=True)
 
     df_casos = marcar_casos_dentro_do_municipio(df_casos, municipio)
+    # Camadas por exame: todas as notificações com coordenada, antes do filtro de confirmados
+    df_notificacoes = df_casos.copy()
 
     # ---------------- CONFIRMADOS x NOTIFICAÇÕES ----------------
     modo_classificacao = "📋 Todas as notificações"
@@ -799,7 +809,24 @@ with st.sidebar:
                 elif anos_calor:
                     ano_calor = st.select_slider("Ano do mapa de calor", options=anos_calor,
                                                  value=anos_calor[-1], key="ano_calor")
+
+        # ---------------- CAMADAS POR EXAME ----------------
+        st.markdown("**🧪 Camadas por exame**")
+        camadas_exame = st.multiselect(
+            "Mostrar no mapa", list(CATEGORIAS_EXAME), default=[], key="camadas_exame",
+            help="Cada categoria é uma camada independente. Entram todas as notificações com o resultado, "
+                 "mesmo sem classificação final, nos anos marcados acima.",
+        )
+        modo_camadas = "📍🔥 Marcadores + Mapa de Calor"
+        if camadas_exame:
+            modo_camadas = st.radio(
+                "Exibir camadas como",
+                ["🔥 Mapa de Calor", "📍 Marcadores", "📍🔥 Marcadores + Mapa de Calor"],
+                index=2, key="modo_camadas",
+            )
+            st.caption("Desmarque **Mostrar casos no mapa** para ver só as camadas por exame.")
     else:
+        camadas_exame, modo_camadas = [], ""
         mostrar_casos = False
         tipo_visualizacao = "📍 Marcadores"
         agravo_calor, ano_calor = None, None
@@ -1097,6 +1124,21 @@ with aba_mapa:
             else:
                 aviso_calor = f"Nenhum caso de {titulo_calor} com os filtros atuais."
 
+    # ---------------- CAMADAS POR EXAME ----------------
+    contagem_camadas = {}
+    if camadas_exame and not df_notificacoes.empty:
+        df_camadas = df_notificacoes[df_notificacoes["Ano"].isin(filtros["anos"])]
+        if not filtros.get("incluir_fora", True) and "Dentro_Municipio" in df_camadas.columns:
+            df_camadas = df_camadas[df_camadas["Dentro_Municipio"]]
+        raio_camadas = max(8, min(60, int(raio_calor * (13 / max(zoom, 1))))) if raio_adaptativo else raio_calor
+        contagem_camadas = adicionar_camadas_exame(
+            m, df_camadas, camadas_exame,
+            mostrar_calor="🔥" in modo_camadas, mostrar_marcadores="📍" in modo_camadas,
+            raio=raio_camadas, desfoque=max(raio_camadas // 2, 1),
+        )
+        adicionar_legenda_camadas(m, camadas_exame, contagem_camadas,
+                                  "🔥" in modo_camadas, "📍" in modo_camadas)
+
     # ---------------- UBS ----------------
     if not ubs.empty:
         camada_ubs = MarkerCluster(name="UBS").add_to(m) if cluster and len(ubs) > 1 else m
@@ -1191,6 +1233,12 @@ with aba_mapa:
     )
     if aviso_calor:
         st.info(f"🔥 {aviso_calor}")
+    if camadas_exame and not any(contagem_camadas.values()):
+        st.info("🧪 Nenhuma notificação com coordenada nas camadas por exame escolhidas, nos anos marcados.")
+
+    if not df_casos.empty:
+        st.divider()
+        renderizar_bairros_prioritarios(df_notificacoes_bairro, filtros["anos"], key_prefix="bairros")
 
     if mostrar_casos and not df_casos_filtrado.empty:
         st.divider()
