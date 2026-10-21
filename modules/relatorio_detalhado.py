@@ -82,7 +82,7 @@ TEXTO_MAPAS_CALOR = (
     "Mesmos mapas da comparação entre anos do painel (aba Mapa Geral). Cada mancha mostra onde os casos "
     "se concentraram: tons frios indicam poucos casos por perto e tons quentes, muitos casos próximos uns "
     "dos outros. Todos os anos usam a mesma escala de cores, então dá para comparar um ano com outro. "
-    "Os círculos azul-escuros são as UBS e a linha cinza é o limite do município."
+    "A linha cinza é o limite do município."
 )
 
 # =====================================================================
@@ -515,7 +515,8 @@ def gerar_pdf(df, populacao, filtros_texto, variaveis, comparacao, incluir_mapa,
     if incluir_mapa:
         h.append(PageBreak())
         h.append(Paragraph(f"{len(variaveis) + 1}. Mapas de calor por ano", e["h1"]))
-        fig_mapas = (figura_comparacao_anos(df, municipio_gdf, ubs_gdf, anos=anos_mapa, config=config_mapa)
+        fig_mapas = (figura_comparacao_anos(df, municipio_gdf, ubs_gdf, anos=anos_mapa,
+                                            config={**(config_mapa or {}), "mostrar_ubs": False})
                      if anos_mapa is None or len(anos_mapa) else None)
         if fig_mapas is not None:
             h.append(_imagem(fig_mapas))
@@ -640,6 +641,7 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
         )
         # mesma aparência escolhida na comparação entre anos da aba Mapa Geral
         config_mapa = config_comparacao_do_painel(st.session_state)
+        config_mapa["mostrar_ubs"] = False  # no relatório os mapas saem sem as UBS (no painel continuam)
         fig = figura_comparacao_anos(df, municipio_gdf, ubs_gdf, anos=anos_mapa, config=config_mapa) if anos_mapa else None
         if fig is not None:
             st.pyplot(fig, use_container_width=True)
