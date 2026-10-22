@@ -13,7 +13,7 @@ Desenvolvido no **Programa de Educação pelo Trabalho para a Saúde: Informaç�
 | Arquivo | Para quem | Localização dos casos |
 |---|---|---|
 | `Passo8_PET_DASH_MARK5.py` | Vigilância Epidemiológica (acesso restrito por e-mail) | Coordenadas das notificações (rua) |
-| `Painel_Arboviroses_Pinheiro.py` | População (consulta pública) | Só o **bairro**: cada caso vai para o ponto de referência do bairro (`assets/bairros_pinheiro.csv`). Não lê latitude/longitude, não mostra registros individuais nem o link da planilha |
+| `Painel_Arboviroses_Pinheiro.py` | População (consulta pública) | Bolhas e nomes no ponto de referência do **bairro** (`assets/bairros_pinheiro.csv`); mapa de calor como imagem borrada (~1 km) calculada no servidor, sem enviar coordenadas ao navegador. Não mostra registros individuais nem o link da planilha |
 
 Os dois leem a mesma Google Planilha. No painel público, Zona Rural e notificações sem bairro ficam fora do mapa, mas entram em todas as contagens. Os pontos dos bairros podem ser corrigidos pela Vigilância em `assets/bairros_pinheiro.csv` (`Bairro;Latitude;Longitude;Observacao`).
 

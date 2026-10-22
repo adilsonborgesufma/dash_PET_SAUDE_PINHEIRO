@@ -3,10 +3,11 @@ Painel de Arboviroses de Pinheiro/MA — VERSÃO PÚBLICA (por bairro)
 
 Cópia do Passo8_PET_DASH_MARK5.py (versão da Vigilância) adaptada para consulta
 pela população, sem ferir a LGPD:
-  - NÃO lê latitude/longitude das notificações. Cada caso é colocado no ponto de
-    referência do seu BAIRRO (assets/bairros_pinheiro.csv, editável).
-  - O mapa mostra bolhas por bairro com o nome e o total de casos; o mapa de calor
-    também é calculado por bairro.
+  - As bolhas e os nomes do mapa ficam no ponto de referência do BAIRRO
+    (assets/bairros_pinheiro.csv, editável), nunca no endereço.
+  - O mapa de calor é calculado no servidor com a latitude/longitude das notificações
+    e enviado ao navegador só como IMAGEM borrada (~1 km): as coordenadas nunca saem
+    do servidor (modules/calor_suavizado.py).
   - Não há tabela nem CSV caso a caso: só contagens agregadas por bairro, ano e agravo.
   - Não mostra o link da planilha.
   - Zona Rural e notificações sem bairro não aparecem no mapa, mas entram em todas
