@@ -164,10 +164,8 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
     import streamlit as st
     from streamlit_folium import st_folium
 
-    from modules.camadas_exames import (
-        CATEGORIAS_EXAME, adicionar_camadas_exame, adicionar_legenda_camadas, mascara_categoria,
-    )
-    from modules.comparacao_mapas import DESLOCAMENTO_REFERENCIA_GRAUS, calcular_pico
+    from modules.calor_suavizado import adicionar_imagem_calor, densidade, pico
+    from modules.camadas_exames import CATEGORIAS_EXAME, adicionar_legenda_camadas, mascara_categoria
 
     nome = next(iter(CATEGORIAS_EXAME))  # "RT-PCR dengue positivo"
     st.subheader("🧪 Mapa de calor: RT-PCR de dengue positivo")
@@ -186,7 +184,7 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
     referencia = carregar_referencia_bairros()
     centro = ([float(referencia["Latitude"].median()), float(referencia["Longitude"].median())]
               if not referencia.empty else [-2.525, -45.085])
-    zoom, raio, desfoque = 14, 28, 18
+    zoom = 14
     mapa = folium.Map(location=centro, zoom_start=zoom, tiles="OpenStreetMap", control_scale=True)
     if municipio_gdf is not None and not municipio_gdf.empty:
         folium.GeoJson(
@@ -195,26 +193,30 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
             name="Limite municipal",
         ).add_to(mapa)
 
-    # mesma régua de cores em todos os anos (ponto de referência invisível)
-    base = no_mapa[["Ano", "Latitude", "Longitude"]]
-    pico = calcular_pico(base, centro[1], centro[0], zoom, 900, altura, raio, desfoque) if not base.empty else 1.0
-    ponto_ref = [centro[0] - DESLOCAMENTO_REFERENCIA_GRAUS, centro[1] + DESLOCAMENTO_REFERENCIA_GRAUS, float(pico)]
-    contagem = {}
-    for ano in anos:
-        parcial = adicionar_camadas_exame(mapa, dados[dados["Ano"] == ano], [nome], raio=raio, desfoque=desfoque,
-                                          sufixo=f" · {ano}", mostrar=True, referencia=ponto_ref, icone="🦟")
-        for k, v in parcial.items():
-            contagem[k] = contagem.get(k, 0) + v
+    # Calor SUAVIZADO: calculado aqui com as coordenadas reais e enviado só como imagem
+    # borrada (~1 km), uma camada por ano, todas com a mesma escala de cores.
+    reais = (positivos.dropna(subset=["Lat_Real", "Lon_Real"])
+             if "Lat_Real" in positivos.columns else positivos.iloc[0:0])
+    limites = (tuple(municipio_gdf.to_crs(epsg=4326).total_bounds) if municipio_gdf is not None
+               and not municipio_gdf.empty else (-45.36, -2.82, -44.90, -2.17))
+    superficies = {ano: densidade(reais.loc[reais["Ano"] == ano, "Lat_Real"],
+                                  reais.loc[reais["Ano"] == ano, "Lon_Real"], limites)
+                   for ano in anos if (reais["Ano"] == ano).any()}
+    maximo = pico(superficies.values())
+    for ano, dens in superficies.items():
+        adicionar_imagem_calor(mapa, dens, limites, CATEGORIAS_EXAME[nome]["gradiente"], maximo,
+                               f"🦟 {nome} · {ano}", mostrar=True)
+    contagem = {nome: len(reais)}
     adicionar_nomes_bairros(mapa, no_mapa, nome_camada="🏷️ Bairros (RT-PCR positivos)")
     adicionar_legenda_camadas(mapa, [nome], contagem)
     folium.LayerControl(collapsed=False).add_to(mapa)
     st_folium(mapa, height=altura, use_container_width=True, returned_objects=[],
               center=tuple(centro), zoom=zoom, key=f"{key_prefix}_{'_'.join(map(str, anos))}")
 
-    fora = len(positivos) - len(no_mapa)
     st.caption(
         f"{len(positivos)} notificação(ões) com RT-PCR de dengue positivo (coluna RTPCRDE) em "
-        f"{', '.join(map(str, anos))}, contadas no bairro da ficha, sem endereço. Use o botão de camadas "
-        "do mapa para ligar e desligar cada ano; todos os anos usam a mesma escala de cores."
-        + (f" {fora} delas são da Zona Rural ou sem bairro e não aparecem no mapa." if fora else "")
+        f"{', '.join(map(str, anos))}. O calor é uma imagem borrada (cerca de 1 km) calculada a partir "
+        "da localização das notificações, que não é mostrada; os nomes indicam quantos positivos há em "
+        "cada bairro. Use o botão de camadas do mapa para ligar e desligar cada ano; todos os anos usam "
+        "a mesma escala de cores."
     )

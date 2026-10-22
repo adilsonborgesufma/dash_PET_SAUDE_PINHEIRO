@@ -31,7 +31,7 @@ import folium
 import geopandas as gpd
 import pandas as pd
 import streamlit as st
-from folium.plugins import HeatMap, MarkerCluster
+from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 
 # ---------------------------------------------------------------------
@@ -54,7 +54,7 @@ except (ImportError, AttributeError):
 
 from modules.config import CORES_CASOS_MAPA, POPULACAO_PADRAO
 from modules.dados import encontrar_campo_nome, load_geodata
-from modules.comparacao_mapas import DESLOCAMENTO_REFERENCIA_GRAUS, calcular_pico, renderizar_comparacao_anos
+from modules.comparacao_mapas import renderizar_comparacao_anos
 from modules.graficos import renderizar_estatisticas_e_graficos, renderizar_visao_geral
 from modules.exportacao import renderizar_exportacao_rodape, renderizar_tabela_ubs
 from modules.relatorio_detalhado import renderizar_aba_relatorio
@@ -62,8 +62,11 @@ from modules.bairros import (
     adicionar_bolhas_bairros, adicionar_nomes_bairros, atribuir_coordenadas_bairro, carregar_referencia_bairros, renderizar_mapa_rtpcr,
     tabela_casos_por_bairro, texto_nao_mapeados,
 )
+from modules.calor_suavizado import adicionar_imagem_calor
+from modules.calor_suavizado import densidade as _densidade_suave
+from modules.calor_suavizado import pico as pico_calor_suave
 from modules.camadas_exames import (
-    CATEGORIAS_EXAME, adicionar_camadas_exame, adicionar_legenda_camadas, mascara_categoria,
+    CATEGORIAS_EXAME, adicionar_legenda_camadas, mascara_categoria,
     renderizar_bairros_prioritarios,
 )
 from modules.creditos import DESENVOLVIMENTO, EQUIPE, ORIENTACAO, RODAPE_SISTEMA, SOBRE_SISTEMA
@@ -184,7 +187,10 @@ def _faixa_etaria(idade):
 ORDEM_FAIXAS = ["0–9", "10–19", "20–29", "30–39", "40–49", "50–59", "60+", "Não informada"]
 
 APELIDOS_COLUNAS = {
-    # Versão pública: LAT/LONG da planilha NÃO são lidas (o ponto vem do bairro).
+    # Versão pública: LAT/LONG são lidas como Lat_Real/Lon_Real e usadas SÓ no servidor
+    # para desenhar o calor suavizado (imagem). Nunca aparecem no mapa, tabelas ou arquivos.
+    "lat": "Lat_Real", "latitude": "Lat_Real",
+    "log": "Lon_Real", "lon": "Lon_Real", "long": "Lon_Real", "longitude": "Lon_Real",
     "agravo": "Tipo_Caso", "casos": "Tipo_Caso", "caso": "Tipo_Caso", "tipo_caso": "Tipo_Caso",
     "sexo": "Genero", "genero": "Genero", "gênero": "Genero",
     "idade": "Idade",
@@ -228,6 +234,10 @@ def padronizar_df_casos(df):
         df["Latitude"] = df["Latitude"].apply(lambda v: _corrigir_coordenada(v, 1)).astype(float)
     if "Longitude" in df.columns:
         df["Longitude"] = df["Longitude"].apply(lambda v: _corrigir_coordenada(v, 2)).astype(float)
+    if "Lat_Real" in df.columns:
+        df["Lat_Real"] = df["Lat_Real"].apply(lambda v: _corrigir_coordenada(v, 1)).astype(float)
+    if "Lon_Real" in df.columns:
+        df["Lon_Real"] = df["Lon_Real"].apply(lambda v: _corrigir_coordenada(v, 2)).astype(float)
 
     # Ano (direto ou a partir da data da notificação; por último, o nome da aba)
     if "Ano" in df.columns:
@@ -272,7 +282,8 @@ def padronizar_df_casos(df):
     # Mantém SOMENTE as colunas do dashboard. Endereço, bairro, nº da ficha,
     # escolaridade etc. são descartados aqui e não chegam ao mapa nem às exportações.
     # O bairro é mantido só para o ranking de bairros prioritários (contagem agregada).
-    manter = [c for c in list(COLUNAS_EXIBICAO) + ["Faixa_Etaria", "Classificacao", "Bairro"] if c in df.columns]
+    manter = [c for c in list(COLUNAS_EXIBICAO) + ["Faixa_Etaria", "Classificacao", "Bairro", "Lat_Real", "Lon_Real"]
+              if c in df.columns]
     df = df[manter]
 
     return df.reset_index(drop=True), n_descartados
@@ -516,6 +527,17 @@ def aplicar_filtros(df, filtros):
 
 
 ALTURA_MAPA = 620  # pixels
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def _densidade_em_cache(lats, lons, limites):
+    return _densidade_suave(lats, lons, limites)
+
+
+def densidade_cache(df_pontos, limites):
+    """Superfície de calor suavizado (guardada em cache) a partir de Lat_Real/Lon_Real."""
+    return _densidade_em_cache(tuple(df_pontos["Lat_Real"].round(6)), tuple(df_pontos["Lon_Real"].round(6)),
+                               tuple(float(v) for v in limites))
 
 # =====================================================================
 # POPULAÇÃO OFICIAL (API do IBGE)
@@ -1088,37 +1110,21 @@ with aba_mapa:
         if mostrar_nomes_bairros and anos_no_mapa:
             adicionar_nomes_bairros(m, df_mapa)
 
-        # Mapa de calor: SÓ o agravo escolhido na barra lateral (e só o ano, se escolhido)
+        # Mapa de calor SUAVIZADO: calculado no servidor com as coordenadas reais e enviado
+        # ao navegador só como IMAGEM borrada (~1 km) — os pontos nunca saem do servidor.
+        # Uma camada por ano (anos marcados), todas com a mesma escala de cores.
         if mostrar_mapa_calor and agravo_calor:
-            # RÉGUA FIXA EM NÚMERO DE CASOS, igual para todos os anos.
-            # O mapa de calor do folium pinta cada mapa em relação ao seu PRÓPRIO ponto
-            # mais concentrado (um ano com 3 casos ficaria tão vermelho quanto um com 300).
-            # Aqui calculamos o maior acúmulo de casos de TODOS os anos do agravo e
-            # colocamos um ponto de referência invisível, fora da área do mapa, com esse
-            # peso — assim o vermelho sempre significa o mesmo número de casos.
-            base_escala = df_casos_filtrado[df_casos_filtrado["Tipo_Caso"] == agravo_calor]
-            base_escala = base_escala[["Ano", "Latitude", "Longitude"]].dropna()
-            pico_calor = int(calcular_pico(
-                base_escala, centro[1], centro[0], zoom, 900, ALTURA_MAPA, raio_calor_efetivo, blur_calor,
-            )) if not base_escala.empty else 1
-
-            titulo_calor = agravo_calor + (f" ({ano_calor})" if ano_calor is not None else "")
-            ponto_referencia = [centro[0] - DESLOCAMENTO_REFERENCIA_GRAUS,
-                                centro[1] + DESLOCAMENTO_REFERENCIA_GRAUS, float(pico_calor)]
-            if not df_mapa[["Latitude", "Longitude"]].dropna().empty:
-                # Uma camada de calor por ano, todas com a mesma régua e todas ligadas
-                for ano in anos_no_mapa:
-                    pontos_ano = df_mapa[df_mapa["Ano"] == ano][["Latitude", "Longitude"]].dropna().values
-                    if not len(pontos_ano):
-                        continue
-                    heat_data = [[lat, lon, 1.0] for lat, lon in pontos_ano] + [ponto_referencia]
-                    fg_calor = folium.FeatureGroup(name=f"🦟 {agravo_calor} · {ano}",
-                                                   show=True)
-                    HeatMap(
-                        heat_data, radius=raio_calor_efetivo, blur=blur_calor,
-                        min_opacity=0.3, gradient=gradiente_calor.get(agravo_calor),
-                    ).add_to(fg_calor)
-                    fg_calor.add_to(m)
+            titulo_calor = agravo_calor
+            base_calor = df_mapa.dropna(subset=["Lat_Real", "Lon_Real"]) if "Lat_Real" in df_mapa.columns else df_mapa.iloc[0:0]
+            superficies = {
+                ano: densidade_cache(base_calor[base_calor["Ano"] == ano], tuple(bounds))
+                for ano in anos_no_mapa if (base_calor["Ano"] == ano).any()
+            }
+            if superficies:
+                pico_calor = max(int(round(pico_calor_suave(superficies.values()))), 1)
+                for ano, dens in superficies.items():
+                    adicionar_imagem_calor(m, dens, bounds, gradiente_calor.get(agravo_calor, gradiente_calor["Dengue"]),
+                                           pico_calor, f"🦟 {agravo_calor} · {ano}", mostrar=True)
             else:
                 aviso_calor = f"Nenhum caso de {titulo_calor} com os filtros atuais."
 
@@ -1128,24 +1134,17 @@ with aba_mapa:
         df_camadas = df_notificacoes[df_notificacoes["Ano"].isin(filtros["anos"])]
         if not filtros.get("incluir_fora", True) and "Dentro_Municipio" in df_camadas.columns:
             df_camadas = df_camadas[df_camadas["Dentro_Municipio"]]
-        raio_camadas = max(8, min(60, int(raio_calor * (13 / max(zoom, 1))))) if raio_adaptativo else raio_calor
-        desfoque_camadas = max(raio_camadas // 2, 1)
-        # Uma camada por ano (anos marcados), todas com a mesma régua de cores e ligadas
-        positivos = df_camadas[mascara_categoria(df_camadas, camadas_exame[0])]
-        base_rt = positivos[["Ano", "Latitude", "Longitude"]].dropna()
-        pico_rt = calcular_pico(base_rt, centro[1], centro[0], zoom, 900, ALTURA_MAPA,
-                                raio_camadas, desfoque_camadas) if not base_rt.empty else 1.0
-        referencia_rt = [centro[0] - DESLOCAMENTO_REFERENCIA_GRAUS,
-                         centro[1] + DESLOCAMENTO_REFERENCIA_GRAUS, float(pico_rt)]
-        anos_rt = sorted(int(a) for a in df_camadas["Ano"].dropna().unique())
-        for ano in anos_rt:
-            parcial = adicionar_camadas_exame(
-                m, df_camadas[df_camadas["Ano"] == ano], camadas_exame, raio=raio_camadas,
-                desfoque=desfoque_camadas, sufixo=f" · {ano}", mostrar=True, icone="🦟",
-                referencia=referencia_rt,
-            )
-            for nome_cat, n in parcial.items():
-                contagem_camadas[nome_cat] = contagem_camadas.get(nome_cat, 0) + n
+        # Mesmo calor suavizado (imagem, sem pontos), uma camada por ano, mesma escala
+        nome_rt = camadas_exame[0]
+        positivos = df_camadas[mascara_categoria(df_camadas, nome_rt)]
+        positivos = positivos.dropna(subset=["Lat_Real", "Lon_Real"]) if "Lat_Real" in positivos.columns else positivos.iloc[0:0]
+        anos_rt = sorted(int(a) for a in positivos["Ano"].dropna().unique())
+        superficies_rt = {ano: densidade_cache(positivos[positivos["Ano"] == ano], tuple(bounds)) for ano in anos_rt}
+        pico_rt = pico_calor_suave(superficies_rt.values())
+        for ano, dens in superficies_rt.items():
+            adicionar_imagem_calor(m, dens, bounds, CATEGORIAS_EXAME[nome_rt]["gradiente"], pico_rt,
+                                   f"🦟 {nome_rt} · {ano}", mostrar=True)
+        contagem_camadas[nome_rt] = len(positivos)
         adicionar_legenda_camadas(m, camadas_exame, contagem_camadas)
 
     # ---------------- UBS ----------------
@@ -1200,11 +1199,9 @@ with aba_mapa:
             titulo_calor_legenda = html.escape(agravo_calor + (f" · {ano_calor}" if ano_calor is not None else ""))
             # Marcas da régua em número de casos (a mesma para todos os anos)
             if pico_calor >= 3:
-                marcas = ["1", str(round(pico_calor / 2)), f"{pico_calor}+"]
-            elif pico_calor == 2:
-                marcas = ["1", "2+"]
+                marcas = ["0", str(round(pico_calor / 2)), f"{pico_calor}+"]
             else:
-                marcas = ["1"]
+                marcas = ["0", f"{pico_calor}+"]
             marcas_html = "".join(f"<span>{marca}</span>" for marca in marcas)
             bloco_intensidade = f"""
             <div style="margin-top:8px; padding-top:6px; border-top:1px solid #ddd;">
