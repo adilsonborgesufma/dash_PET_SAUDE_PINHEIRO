@@ -820,15 +820,8 @@ with st.sidebar:
                 help="Ajusta o raio do calor ao zoom inicial do mapa.",
             )
 
-            # Substitui a antiga "linha do tempo animada", que não funcionava no Streamlit
-            anos_calor = sorted(int(a) for a in filtros["anos"])
-            if st.checkbox("📅 Ver o calor de um ano por vez", False, key="calor_por_ano",
-                           help="Mostra no mapa de calor só o ano escolhido. Arraste para comparar os anos."):
-                if len(anos_calor) == 1:
-                    ano_calor = anos_calor[0]
-                elif anos_calor:
-                    ano_calor = st.select_slider("Ano do mapa de calor", options=anos_calor,
-                                                 value=anos_calor[-1], key="ano_calor")
+            # Versão pública: cada ano marcado em "📅 Ano" vira uma camada do mapa
+            # (liga/desliga no botão de camadas), então não há seletor de um ano por vez.
 
         # ---------------- MAPA DE CALOR DO RT-PCR ----------------
         camada_rtpcr = st.checkbox(
@@ -1119,7 +1112,7 @@ with aba_mapa:
                     if not len(pontos_ano):
                         continue
                     heat_data = [[lat, lon, 1.0] for lat, lon in pontos_ano] + [ponto_referencia]
-                    fg_calor = folium.FeatureGroup(name=f"🔥 {agravo_calor} · {ano}",
+                    fg_calor = folium.FeatureGroup(name=f"🦟 {agravo_calor} · {ano}",
                                                    show=True)
                     HeatMap(
                         heat_data, radius=raio_calor_efetivo, blur=blur_calor,
@@ -1148,7 +1141,7 @@ with aba_mapa:
         for ano in anos_rt:
             parcial = adicionar_camadas_exame(
                 m, df_camadas[df_camadas["Ano"] == ano], camadas_exame, raio=raio_camadas,
-                desfoque=desfoque_camadas, sufixo=f" · {ano}", mostrar=True,
+                desfoque=desfoque_camadas, sufixo=f" · {ano}", mostrar=True, icone="🦟",
                 referencia=referencia_rt,
             )
             for nome_cat, n in parcial.items():

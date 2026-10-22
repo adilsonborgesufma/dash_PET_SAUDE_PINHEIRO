@@ -56,7 +56,8 @@ def padronizar_bairros(serie):
 
 # ======================= mapa =======================
 
-def adicionar_camadas_exame(mapa, df, categorias, raio, desfoque, sufixo="", mostrar=True, referencia=None):
+def adicionar_camadas_exame(mapa, df, categorias, raio, desfoque, sufixo="", mostrar=True, referencia=None,
+                            icone="🔥"):
     """Mapa de calor de cada categoria (liga/desliga também pelo botão de camadas do mapa).
     'sufixo' entra no nome da camada (ex.: " · 2026"); 'referencia' = [lat, lon, peso] de um
     ponto invisível que fixa a escala de cores (mesma régua em todas as camadas)."""
@@ -69,7 +70,7 @@ def adicionar_camadas_exame(mapa, df, categorias, raio, desfoque, sufixo="", mos
         contagem[nome] = len(dados)
         if dados.empty:
             continue
-        camada = folium.FeatureGroup(name=f"🔥 {nome}{sufixo}", show=mostrar)
+        camada = folium.FeatureGroup(name=f"{icone} {nome}{sufixo}", show=mostrar)
         pontos = [[lat, lon, 1.0] for lat, lon in dados[["Latitude", "Longitude"]].values.tolist()]
         if referencia is not None:
             pontos.append(list(referencia))

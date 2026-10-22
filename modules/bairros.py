@@ -202,7 +202,7 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
     contagem = {}
     for ano in anos:
         parcial = adicionar_camadas_exame(mapa, dados[dados["Ano"] == ano], [nome], raio=raio, desfoque=desfoque,
-                                          sufixo=f" · {ano}", mostrar=True, referencia=ponto_ref)
+                                          sufixo=f" · {ano}", mostrar=True, referencia=ponto_ref, icone="🦟")
         for k, v in parcial.items():
             contagem[k] = contagem.get(k, 0) + v
     adicionar_nomes_bairros(mapa, no_mapa, nome_camada="🏷️ Bairros (RT-PCR positivos)")
