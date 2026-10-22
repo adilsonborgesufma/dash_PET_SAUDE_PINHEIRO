@@ -133,3 +133,64 @@ def tabela_casos_por_bairro(df):
     totais = tabela.groupby("Bairro")["Casos"].transform("sum")
     return tabela.assign(_t=totais).sort_values(["_t", "Bairro", "Ano", "Agravo"],
                                                 ascending=[False, True, True, True]).drop(columns="_t")
+
+
+def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=520, key_prefix="mapa_rtpcr"):
+    """Mapa próprio do RT-PCR de dengue positivo (coluna RTPCRDE), por bairro:
+    mapa de calor + nome do bairro com o nº de casos RT-PCR positivos."""
+    import streamlit as st
+    from streamlit_folium import st_folium
+
+    from modules.camadas_exames import (
+        CATEGORIAS_EXAME, adicionar_camadas_exame, adicionar_legenda_camadas, mascara_categoria,
+    )
+
+    nome = next(iter(CATEGORIAS_EXAME))  # "RT-PCR dengue positivo"
+    st.subheader("🧪 Mapa de calor: RT-PCR de dengue positivo")
+    if df_notificacoes is None or df_notificacoes.empty:
+        st.info("Sem notificações para o mapa do RT-PCR.")
+        return
+
+    anos_disponiveis = sorted(int(a) for a in df_notificacoes["Ano"].dropna().unique())
+    anos_marcados = [int(a) for a in anos_marcados if int(a) in anos_disponiveis] or anos_disponiveis
+    periodo = st.radio(
+        "Período do mapa", [f"Só {anos_marcados[-1]} (ano mais recente)", "Anos marcados na barra lateral"],
+        horizontal=True, key=f"{key_prefix}_periodo",
+    )
+    anos = [anos_marcados[-1]] if periodo.startswith("Só") else anos_marcados
+    dados = df_notificacoes[df_notificacoes["Ano"].isin(anos)]
+    positivos = dados[mascara_categoria(dados, nome)]
+    no_mapa = positivos.dropna(subset=["Latitude", "Longitude"])
+
+    referencia = carregar_referencia_bairros()
+    centro = ([float(referencia["Latitude"].median()), float(referencia["Longitude"].median())]
+              if not referencia.empty else [-2.525, -45.085])
+    mapa = folium.Map(location=centro, zoom_start=14, tiles="OpenStreetMap", control_scale=True)
+    if municipio_gdf is not None and not municipio_gdf.empty:
+        folium.GeoJson(
+            municipio_gdf[["geometry"]],
+            style_function=lambda _: {"color": "#374151", "weight": 1.5, "fill": False},
+            name="Limite municipal",
+        ).add_to(mapa)
+    contagem = adicionar_camadas_exame(mapa, dados, [nome], raio=28, desfoque=18)
+    for bairro, grupo in no_mapa.groupby("Bairro"):
+        folium.Marker(
+            location=[float(grupo["Latitude"].iloc[0]), float(grupo["Longitude"].iloc[0])],
+            tooltip=f"{bairro}: {len(grupo)} RT-PCR positivo(s)",
+            icon=folium.DivIcon(
+                icon_size=(160, 30), icon_anchor=(80, 8),
+                html=(f'<div style="text-align:center;font:600 11px sans-serif;color:#1F2937;'
+                      f'text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">'
+                      f'{bairro} · {len(grupo)}</div>'),
+            ),
+        ).add_to(mapa)
+    adicionar_legenda_camadas(mapa, [nome], contagem)
+    st_folium(mapa, height=altura, use_container_width=True, returned_objects=[],
+              center=tuple(centro), zoom=14, key=f"{key_prefix}_{'_'.join(map(str, anos))}")
+
+    fora = len(positivos) - len(no_mapa)
+    st.caption(
+        f"{len(positivos)} notificação(ões) com RT-PCR de dengue positivo (coluna RTPCRDE) em "
+        f"{', '.join(map(str, anos))}, todas contadas no bairro da ficha, sem endereço."
+        + (f" {fora} delas são da Zona Rural ou sem bairro e não aparecem no mapa." if fora else "")
+    )

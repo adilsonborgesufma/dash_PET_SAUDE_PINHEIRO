@@ -11,6 +11,9 @@ pela população, sem ferir a LGPD:
   - Não mostra o link da planilha.
   - Zona Rural e notificações sem bairro não aparecem no mapa, mas entram em todas
     as contagens e gráficos.
+  - A classificação final (confirmado/descartado) vem da coluna revisada à direita de
+    CLASSIF (coluna Y, "CLASSIF (Josiedna e Adilson)").
+  - Mapa próprio do RT-PCR de dengue positivo (coluna RTPCRDE), por bairro.
 """
 import html
 import json
@@ -56,7 +59,7 @@ from modules.graficos import renderizar_estatisticas_e_graficos, renderizar_visa
 from modules.exportacao import renderizar_exportacao_rodape, renderizar_tabela_ubs
 from modules.relatorio_detalhado import renderizar_aba_relatorio
 from modules.bairros import (
-    adicionar_bolhas_bairros, atribuir_coordenadas_bairro, carregar_referencia_bairros,
+    adicionar_bolhas_bairros, atribuir_coordenadas_bairro, carregar_referencia_bairros, renderizar_mapa_rtpcr,
     tabela_casos_por_bairro, texto_nao_mapeados,
 )
 from modules.camadas_exames import (
@@ -278,6 +281,21 @@ def _eh_aba_de_ano(nome):
     return re.fullmatch(r"\s*\d{4}\s*", str(nome)) is not None
 
 
+def usar_classificacao_revisada(dados):
+    """Versão pública: a classificação final vem da coluna logo à DIREITA de CLASSIF
+    (coluna Y, hoje "CLASSIF (Josiedna e Adilson)"), revisada pela equipe. A coluna é
+    encontrada pela posição, então continua funcionando se o título for trocado.
+    Se a aba não tiver essa coluna, vale a CLASSIF original."""
+    colunas = list(dados.columns)
+    posicoes = [i for i, c in enumerate(colunas) if str(c).strip().upper() == "CLASSIF"]
+    if not posicoes or posicoes[0] + 1 >= len(colunas):
+        return dados
+    original, revisada = colunas[posicoes[0]], colunas[posicoes[0] + 1]
+    if not str(revisada).strip() or str(revisada).strip().upper() in ("EVOLUÇÃO", "EVOLUCAO"):
+        return dados  # aba ainda sem a coluna revisada
+    return dados.drop(columns=[original]).rename(columns={revisada: "CLASSIF"})
+
+
 def juntar_abas_notificacoes(abas):
     """
     Recebe {nome_da_aba: DataFrame} (uma aba por ano), remove notificações
@@ -292,6 +310,7 @@ def juntar_abas_notificacoes(abas):
             continue
         dados = dados.copy()
         dados.columns = [str(c).strip() for c in dados.columns]
+        dados = usar_classificacao_revisada(dados)
 
         if "NFICHA" in dados.columns and "IDADE" in dados.columns:
             # Mesma ficha + mesma idade + MESMO agravo = digitada duas vezes.
@@ -1201,6 +1220,8 @@ with aba_mapa:
         st.info("🧪 Nenhuma notificação com RT-PCR positivo em bairro do mapa nos anos marcados.")
 
     if not df_casos.empty:
+        st.divider()
+        renderizar_mapa_rtpcr(df_notificacoes, filtros["anos"], municipio)
         st.divider()
         renderizar_bairros_prioritarios(df_notificacoes_bairro, filtros["anos"], key_prefix="bairros")
 
