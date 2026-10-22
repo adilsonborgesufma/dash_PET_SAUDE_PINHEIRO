@@ -84,14 +84,16 @@ def texto_nao_mapeados(resumo):
     return "; ".join(partes)
 
 
-def adicionar_bolhas_bairros(mapa, df, cores_agravo, mostrar_nomes=True):
+def adicionar_bolhas_bairros(mapa, df, cores_agravo, mostrar_nomes=True,
+                             nome_camada="Casos por bairro", mostrar=True, maximo=None, rotulo_ano=None):
     """Uma bolha por bairro (tamanho = nº de casos) com o nome do bairro.
-    O popup mostra só contagens por agravo e por ano, nunca dados individuais."""
+    O popup mostra só contagens por agravo e por ano, nunca dados individuais.
+    'maximo' fixa a escala do tamanho (útil para comparar camadas de anos diferentes)."""
     dados = df.dropna(subset=["Latitude", "Longitude"])
     if dados.empty:
         return 0
-    camada = folium.FeatureGroup(name="Casos por bairro")
-    maximo = dados.groupby("Bairro").size().max()
+    camada = folium.FeatureGroup(name=nome_camada, show=mostrar)
+    maximo = maximo or dados.groupby("Bairro").size().max()
     for bairro, grupo in dados.groupby("Bairro"):
         total = len(grupo)
         lat, lon = float(grupo["Latitude"].iloc[0]), float(grupo["Longitude"].iloc[0])
@@ -99,7 +101,8 @@ def adicionar_bolhas_bairros(mapa, df, cores_agravo, mostrar_nomes=True):
         dominante = por_agravo.index[0]
         cor = cores_agravo.get(dominante, "#1E88E5")
         raio = 7 + 23 * (total / maximo) ** 0.5
-        linhas = [f"<b>{bairro}</b>", f"<b>{total}</b> caso(s)"]
+        linhas = [f"<b>{bairro}</b>" + (f" · {rotulo_ano}" if rotulo_ano is not None else ""),
+                  f"<b>{total}</b> caso(s)"]
         linhas += [f"{agravo}: {n}" for agravo, n in por_agravo.items()]
         por_ano = grupo["Ano"].value_counts().sort_index()
         linhas.append("Por ano: " + ", ".join(f"{int(a)}: {n}" for a, n in por_ano.items()))
@@ -107,9 +110,9 @@ def adicionar_bolhas_bairros(mapa, df, cores_agravo, mostrar_nomes=True):
             location=[lat, lon], radius=raio, color=cor, weight=2,
             fill=True, fill_color=cor, fill_opacity=0.45,
             popup=folium.Popup("<br>".join(linhas), max_width=260),
-            tooltip=f"{bairro}: {total} caso(s)",
+            tooltip=f"{bairro}{f' · {rotulo_ano}' if rotulo_ano is not None else ''}: {total} caso(s)",
         ).add_to(camada)
-        if mostrar_nomes:
+        if mostrar_nomes and rotulo_ano is None:
             folium.Marker(
                 location=[lat, lon],
                 icon=folium.DivIcon(
@@ -121,6 +124,25 @@ def adicionar_bolhas_bairros(mapa, df, cores_agravo, mostrar_nomes=True):
             ).add_to(camada)
     camada.add_to(mapa)
     return dados["Bairro"].nunique()
+
+
+def adicionar_nomes_bairros(mapa, df, nome_camada="🏷️ Nomes dos bairros"):
+    """Camada só com o nome de cada bairro e o total de casos (anos marcados)."""
+    dados = df.dropna(subset=["Latitude", "Longitude"])
+    if dados.empty:
+        return
+    camada = folium.FeatureGroup(name=nome_camada, show=True)
+    for bairro, grupo in dados.groupby("Bairro"):
+        folium.Marker(
+            location=[float(grupo["Latitude"].iloc[0]), float(grupo["Longitude"].iloc[0])],
+            icon=folium.DivIcon(
+                icon_size=(160, 30), icon_anchor=(80, 8),
+                html=(f'<div style="text-align:center;font:600 11px sans-serif;color:#1F2937;'
+                      f'text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">'
+                      f'{bairro} · {len(grupo)}</div>'),
+            ),
+        ).add_to(camada)
+    camada.add_to(mapa)
 
 
 def tabela_casos_por_bairro(df):
@@ -136,14 +158,16 @@ def tabela_casos_por_bairro(df):
 
 
 def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=520, key_prefix="mapa_rtpcr"):
-    """Mapa próprio do RT-PCR de dengue positivo (coluna RTPCRDE), por bairro:
-    mapa de calor + nome do bairro com o nº de casos RT-PCR positivos."""
+    """Mapa próprio do RT-PCR de dengue positivo (coluna RTPCRDE), por bairro.
+    Cada ano marcado na barra lateral vira uma camada (liga/desliga no botão de camadas
+    do mapa), todas com a mesma régua de cores; os nomes dos bairros ficam numa camada à parte."""
     import streamlit as st
     from streamlit_folium import st_folium
 
     from modules.camadas_exames import (
         CATEGORIAS_EXAME, adicionar_camadas_exame, adicionar_legenda_camadas, mascara_categoria,
     )
+    from modules.comparacao_mapas import DESLOCAMENTO_REFERENCIA_GRAUS, calcular_pico
 
     nome = next(iter(CATEGORIAS_EXAME))  # "RT-PCR dengue positivo"
     st.subheader("🧪 Mapa de calor: RT-PCR de dengue positivo")
@@ -151,46 +175,46 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
         st.info("Sem notificações para o mapa do RT-PCR.")
         return
 
-    anos_disponiveis = sorted(int(a) for a in df_notificacoes["Ano"].dropna().unique())
-    anos_marcados = [int(a) for a in anos_marcados if int(a) in anos_disponiveis] or anos_disponiveis
-    periodo = st.radio(
-        "Período do mapa", [f"Só {anos_marcados[-1]} (ano mais recente)", "Anos marcados na barra lateral"],
-        horizontal=True, key=f"{key_prefix}_periodo",
-    )
-    anos = [anos_marcados[-1]] if periodo.startswith("Só") else anos_marcados
+    anos = sorted(int(a) for a in anos_marcados)
     dados = df_notificacoes[df_notificacoes["Ano"].isin(anos)]
     positivos = dados[mascara_categoria(dados, nome)]
     no_mapa = positivos.dropna(subset=["Latitude", "Longitude"])
+    if not anos:
+        st.info("Marque ao menos um ano na barra lateral.")
+        return
 
     referencia = carregar_referencia_bairros()
     centro = ([float(referencia["Latitude"].median()), float(referencia["Longitude"].median())]
               if not referencia.empty else [-2.525, -45.085])
-    mapa = folium.Map(location=centro, zoom_start=14, tiles="OpenStreetMap", control_scale=True)
+    zoom, raio, desfoque = 14, 28, 18
+    mapa = folium.Map(location=centro, zoom_start=zoom, tiles="OpenStreetMap", control_scale=True)
     if municipio_gdf is not None and not municipio_gdf.empty:
         folium.GeoJson(
             municipio_gdf[["geometry"]],
             style_function=lambda _: {"color": "#374151", "weight": 1.5, "fill": False},
             name="Limite municipal",
         ).add_to(mapa)
-    contagem = adicionar_camadas_exame(mapa, dados, [nome], raio=28, desfoque=18)
-    for bairro, grupo in no_mapa.groupby("Bairro"):
-        folium.Marker(
-            location=[float(grupo["Latitude"].iloc[0]), float(grupo["Longitude"].iloc[0])],
-            tooltip=f"{bairro}: {len(grupo)} RT-PCR positivo(s)",
-            icon=folium.DivIcon(
-                icon_size=(160, 30), icon_anchor=(80, 8),
-                html=(f'<div style="text-align:center;font:600 11px sans-serif;color:#1F2937;'
-                      f'text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;white-space:nowrap;">'
-                      f'{bairro} · {len(grupo)}</div>'),
-            ),
-        ).add_to(mapa)
+
+    # mesma régua de cores em todos os anos (ponto de referência invisível)
+    base = no_mapa[["Ano", "Latitude", "Longitude"]]
+    pico = calcular_pico(base, centro[1], centro[0], zoom, 900, altura, raio, desfoque) if not base.empty else 1.0
+    ponto_ref = [centro[0] - DESLOCAMENTO_REFERENCIA_GRAUS, centro[1] + DESLOCAMENTO_REFERENCIA_GRAUS, float(pico)]
+    contagem = {}
+    for ano in anos:
+        parcial = adicionar_camadas_exame(mapa, dados[dados["Ano"] == ano], [nome], raio=raio, desfoque=desfoque,
+                                          sufixo=f" · {ano}", mostrar=True, referencia=ponto_ref)
+        for k, v in parcial.items():
+            contagem[k] = contagem.get(k, 0) + v
+    adicionar_nomes_bairros(mapa, no_mapa, nome_camada="🏷️ Bairros (RT-PCR positivos)")
     adicionar_legenda_camadas(mapa, [nome], contagem)
+    folium.LayerControl(collapsed=False).add_to(mapa)
     st_folium(mapa, height=altura, use_container_width=True, returned_objects=[],
-              center=tuple(centro), zoom=14, key=f"{key_prefix}_{'_'.join(map(str, anos))}")
+              center=tuple(centro), zoom=zoom, key=f"{key_prefix}_{'_'.join(map(str, anos))}")
 
     fora = len(positivos) - len(no_mapa)
     st.caption(
         f"{len(positivos)} notificação(ões) com RT-PCR de dengue positivo (coluna RTPCRDE) em "
-        f"{', '.join(map(str, anos))}, todas contadas no bairro da ficha, sem endereço."
+        f"{', '.join(map(str, anos))}, contadas no bairro da ficha, sem endereço. Use o botão de camadas "
+        "do mapa para ligar e desligar cada ano; todos os anos usam a mesma escala de cores."
         + (f" {fora} delas são da Zona Rural ou sem bairro e não aparecem no mapa." if fora else "")
     )

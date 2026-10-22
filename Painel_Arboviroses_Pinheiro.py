@@ -59,11 +59,12 @@ from modules.graficos import renderizar_estatisticas_e_graficos, renderizar_visa
 from modules.exportacao import renderizar_exportacao_rodape, renderizar_tabela_ubs
 from modules.relatorio_detalhado import renderizar_aba_relatorio
 from modules.bairros import (
-    adicionar_bolhas_bairros, atribuir_coordenadas_bairro, carregar_referencia_bairros, renderizar_mapa_rtpcr,
+    adicionar_bolhas_bairros, adicionar_nomes_bairros, atribuir_coordenadas_bairro, carregar_referencia_bairros, renderizar_mapa_rtpcr,
     tabela_casos_por_bairro, texto_nao_mapeados,
 )
 from modules.camadas_exames import (
-    CATEGORIAS_EXAME, adicionar_camadas_exame, adicionar_legenda_camadas, renderizar_bairros_prioritarios,
+    CATEGORIAS_EXAME, adicionar_camadas_exame, adicionar_legenda_camadas, mascara_categoria,
+    renderizar_bairros_prioritarios,
 )
 from modules.creditos import DESENVOLVIMENTO, EQUIPE, ORIENTACAO, RODAPE_SISTEMA, SOBRE_SISTEMA
 
@@ -1079,8 +1080,20 @@ with aba_mapa:
                 df_mapa = df_mapa[df_mapa["Ano"] == ano_calor]
 
         # Marcadores: UMA bolha por bairro (tamanho = nº de casos), com o nome do bairro.
-        if mostrar_marcadores:
-            adicionar_bolhas_bairros(m, df_mapa, CORES_CASOS_MAPA, mostrar_nomes=mostrar_nomes_bairros)
+        # Os anos marcados na barra lateral viram camadas no botão de camadas do mapa
+        # (uma por ano, todas ligadas), para ligar/desligar cada ano ali também.
+        anos_no_mapa = sorted(int(a) for a in df_mapa["Ano"].dropna().unique())
+        if mostrar_marcadores and anos_no_mapa:
+            com_ponto = df_mapa.dropna(subset=["Latitude", "Longitude"])
+            maximo_bolha = int(com_ponto.groupby(["Ano", "Bairro"]).size().max()) if not com_ponto.empty else None
+            for ano in anos_no_mapa:
+                adicionar_bolhas_bairros(
+                    m, df_mapa[df_mapa["Ano"] == ano], CORES_CASOS_MAPA, mostrar_nomes=mostrar_nomes_bairros,
+                    nome_camada=f"📍 Casos por bairro · {ano}", mostrar=True,
+                    maximo=maximo_bolha, rotulo_ano=ano,
+                )
+        if mostrar_nomes_bairros and anos_no_mapa:
+            adicionar_nomes_bairros(m, df_mapa)
 
         # Mapa de calor: SÓ o agravo escolhido na barra lateral (e só o ano, se escolhido)
         if mostrar_mapa_calor and agravo_calor:
@@ -1096,17 +1109,23 @@ with aba_mapa:
                 base_escala, centro[1], centro[0], zoom, 900, ALTURA_MAPA, raio_calor_efetivo, blur_calor,
             )) if not base_escala.empty else 1
 
-            heat_data = [[lat, lon, 1.0] for lat, lon in df_mapa[["Latitude", "Longitude"]].dropna().values]
             titulo_calor = agravo_calor + (f" ({ano_calor})" if ano_calor is not None else "")
-            if heat_data:
-                heat_data.append([centro[0] - DESLOCAMENTO_REFERENCIA_GRAUS,
-                                  centro[1] + DESLOCAMENTO_REFERENCIA_GRAUS, float(pico_calor)])
-                fg_calor = folium.FeatureGroup(name=f"🔥 Calor - {titulo_calor}", show=True)
-                HeatMap(
-                    heat_data, radius=raio_calor_efetivo, blur=blur_calor,
-                    min_opacity=0.3, gradient=gradiente_calor.get(agravo_calor),
-                ).add_to(fg_calor)
-                fg_calor.add_to(m)
+            ponto_referencia = [centro[0] - DESLOCAMENTO_REFERENCIA_GRAUS,
+                                centro[1] + DESLOCAMENTO_REFERENCIA_GRAUS, float(pico_calor)]
+            if not df_mapa[["Latitude", "Longitude"]].dropna().empty:
+                # Uma camada de calor por ano, todas com a mesma régua e todas ligadas
+                for ano in anos_no_mapa:
+                    pontos_ano = df_mapa[df_mapa["Ano"] == ano][["Latitude", "Longitude"]].dropna().values
+                    if not len(pontos_ano):
+                        continue
+                    heat_data = [[lat, lon, 1.0] for lat, lon in pontos_ano] + [ponto_referencia]
+                    fg_calor = folium.FeatureGroup(name=f"🔥 {agravo_calor} · {ano}",
+                                                   show=True)
+                    HeatMap(
+                        heat_data, radius=raio_calor_efetivo, blur=blur_calor,
+                        min_opacity=0.3, gradient=gradiente_calor.get(agravo_calor),
+                    ).add_to(fg_calor)
+                    fg_calor.add_to(m)
             else:
                 aviso_calor = f"Nenhum caso de {titulo_calor} com os filtros atuais."
 
@@ -1117,9 +1136,23 @@ with aba_mapa:
         if not filtros.get("incluir_fora", True) and "Dentro_Municipio" in df_camadas.columns:
             df_camadas = df_camadas[df_camadas["Dentro_Municipio"]]
         raio_camadas = max(8, min(60, int(raio_calor * (13 / max(zoom, 1))))) if raio_adaptativo else raio_calor
-        contagem_camadas = adicionar_camadas_exame(
-            m, df_camadas, camadas_exame, raio=raio_camadas, desfoque=max(raio_camadas // 2, 1),
-        )
+        desfoque_camadas = max(raio_camadas // 2, 1)
+        # Uma camada por ano (anos marcados), todas com a mesma régua de cores e ligadas
+        positivos = df_camadas[mascara_categoria(df_camadas, camadas_exame[0])]
+        base_rt = positivos[["Ano", "Latitude", "Longitude"]].dropna()
+        pico_rt = calcular_pico(base_rt, centro[1], centro[0], zoom, 900, ALTURA_MAPA,
+                                raio_camadas, desfoque_camadas) if not base_rt.empty else 1.0
+        referencia_rt = [centro[0] - DESLOCAMENTO_REFERENCIA_GRAUS,
+                         centro[1] + DESLOCAMENTO_REFERENCIA_GRAUS, float(pico_rt)]
+        anos_rt = sorted(int(a) for a in df_camadas["Ano"].dropna().unique())
+        for ano in anos_rt:
+            parcial = adicionar_camadas_exame(
+                m, df_camadas[df_camadas["Ano"] == ano], camadas_exame, raio=raio_camadas,
+                desfoque=desfoque_camadas, sufixo=f" · {ano}", mostrar=True,
+                referencia=referencia_rt,
+            )
+            for nome_cat, n in parcial.items():
+                contagem_camadas[nome_cat] = contagem_camadas.get(nome_cat, 0) + n
         adicionar_legenda_camadas(m, camadas_exame, contagem_camadas)
 
     # ---------------- UBS ----------------
