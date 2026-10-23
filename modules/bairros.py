@@ -166,7 +166,7 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
 
     from folium.plugins import HeatMap
 
-    from modules.calor_suavizado import coordenadas_em_grade, pontos_heatmap
+    from modules.calor_suavizado import coordenadas_em_grade, corrigir_calor_em_aba_escondida, pontos_heatmap
     from modules.comparacao_mapas import DESLOCAMENTO_REFERENCIA_GRAUS, calcular_pico, calcular_zoom
     from modules.camadas_exames import CATEGORIAS_EXAME, adicionar_legenda_camadas, mascara_categoria
 
@@ -192,6 +192,7 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
     centro = [(miny + maxy) / 2, (minx + maxx) / 2]
     zoom = int(calcular_zoom((minx, maxx, miny, maxy), 900, altura, 18))
     mapa = folium.Map(location=centro, zoom_start=zoom, tiles="OpenStreetMap", control_scale=True)
+    corrigir_calor_em_aba_escondida(mapa)  # calor só desenha quando a aba do mapa fica visível
     if municipio_gdf is not None and not municipio_gdf.empty:
         folium.GeoJson(
             municipio_gdf[["geometry"]],

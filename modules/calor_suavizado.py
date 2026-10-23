@@ -137,3 +137,54 @@ def pontos_heatmap(df_grade):
         return []
     agrupado = dados.groupby(["Latitude", "Longitude"]).size().reset_index(name="n")
     return agrupado[["Latitude", "Longitude", "n"]].astype(float).values.tolist()
+
+
+# ======================= correção: mapa de calor dentro de aba escondida =======================
+# O Streamlit monta o conteúdo de TODAS as abas ao carregar a página. Um mapa numa aba
+# escondida nasce com largura zero, e o Leaflet.heat dá erro ao desenhar ("source width
+# is 0"), o que interrompe o resto do mapa (camadas, enquadramento). Este ajuste faz o
+# calor esperar o mapa ficar visível e então redesenhar. Deve ser adicionado ao mapa
+# ANTES das camadas de calor.
+_JS_CALOR_ABA_ESCONDIDA = """
+{% macro script(this, kwargs) %}
+(function () {
+  if (!window.L || !L.HeatLayer || L.HeatLayer.prototype._esperaVisivel) { return; }
+  var proto = L.HeatLayer.prototype;
+  var redesenhar = proto._redraw;
+  proto._redraw = function () {
+    if (!this._map) { return; }
+    var tamanho = this._map.getSize();
+    if (!tamanho.x || !tamanho.y) {
+      var camada = this;
+      if (!camada._aguardando) {
+        camada._aguardando = setInterval(function () {
+          if (!camada._map) { clearInterval(camada._aguardando); camada._aguardando = null; return; }
+          var t = camada._map.getContainer().getBoundingClientRect();
+          if (t.width > 0 && t.height > 0) {
+            clearInterval(camada._aguardando); camada._aguardando = null;
+            camada._map.invalidateSize();
+            camada._reset();
+          }
+        }, 400);
+      }
+      return this;
+    }
+    return redesenhar.apply(this, arguments);
+  };
+  proto._esperaVisivel = true;
+})();
+{% endmacro %}
+"""
+
+
+def corrigir_calor_em_aba_escondida(mapa):
+    """Adiciona ao mapa o ajuste acima (chame logo depois de criar o mapa)."""
+    from folium.plugins import HeatMap
+
+    elemento = folium.MacroElement()
+    elemento._template = folium.map.Template(_JS_CALOR_ABA_ESCONDIDA)
+    # garante que o arquivo do Leaflet.heat seja carregado antes deste ajuste
+    for nome, url in HeatMap.default_js:
+        mapa.get_root().header.add_child(folium.JavascriptLink(url), name=nome)
+    mapa.add_child(elemento)
+    return mapa

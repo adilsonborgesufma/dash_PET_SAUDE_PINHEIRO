@@ -63,7 +63,7 @@ from modules.bairros import (
     adicionar_bolhas_bairros, adicionar_nomes_bairros, atribuir_coordenadas_bairro, carregar_referencia_bairros, renderizar_mapa_rtpcr,
     tabela_casos_por_bairro, texto_nao_mapeados,
 )
-from modules.calor_suavizado import coordenadas_em_grade, pontos_heatmap
+from modules.calor_suavizado import coordenadas_em_grade, corrigir_calor_em_aba_escondida, pontos_heatmap
 from modules.camadas_exames import (
     CATEGORIAS_EXAME, adicionar_legenda_camadas, mascara_categoria,
     renderizar_bairros_prioritarios,
@@ -1040,6 +1040,8 @@ with aba_mapa:
         attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         control_scale=True,
     )
+
+    corrigir_calor_em_aba_escondida(m)  # calor só desenha quando a aba do mapa fica visível
 
     if tile == "Satélite":
         folium.TileLayer(
