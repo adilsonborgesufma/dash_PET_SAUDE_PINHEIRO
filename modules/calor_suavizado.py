@@ -104,3 +104,36 @@ def adicionar_imagem_calor(mapa, dens, limites, gradiente, valor_maximo, nome, m
         name=nome, show=mostrar, interactive=False, cross_origin=False, zindex=2,
     ).add_to(mapa)
     return True
+
+
+# ======================= pontos em grade (mapa de calor igual ao do Passo8) =======================
+CELULA_GRADE_METROS = 150  # tamanho do quadradinho enviado ao navegador
+
+
+def coordenadas_em_grade(df, celula_metros=CELULA_GRADE_METROS):
+    """Cópia do DataFrame com Latitude/Longitude = CENTRO do quadradinho de ~150 m onde
+    está a coordenada real (Lat_Real/Lon_Real). É isso que vai para o mapa de calor do
+    navegador: a contagem por quadradinho, nunca a coordenada real do caso.
+    O Leaflet.heat (o mesmo do Passo8) já agrupa os casos em quadradinhos parecidos para
+    desenhar, então o visual fica praticamente igual ao do painel da Vigilância."""
+    saida = df.copy()
+    if "Lat_Real" not in saida.columns or saida.empty:
+        saida["Latitude"] = np.nan
+        saida["Longitude"] = np.nan
+        return saida
+    lat = saida["Lat_Real"].astype(float)
+    lon = saida["Lon_Real"].astype(float)
+    passo_y = celula_metros / 110540
+    passo_x = celula_metros / (111320 * math.cos(math.radians(-2.5)))
+    saida["Latitude"] = (np.floor(lat / passo_y) + 0.5) * passo_y
+    saida["Longitude"] = (np.floor(lon / passo_x) + 0.5) * passo_x
+    return saida
+
+
+def pontos_heatmap(df_grade):
+    """[lat, lon, nº de casos] por quadradinho (o Leaflet soma os pesos, como no Passo8)."""
+    dados = df_grade.dropna(subset=["Latitude", "Longitude"])
+    if dados.empty:
+        return []
+    agrupado = dados.groupby(["Latitude", "Longitude"]).size().reset_index(name="n")
+    return agrupado[["Latitude", "Longitude", "n"]].astype(float).values.tolist()
