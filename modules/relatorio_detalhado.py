@@ -452,8 +452,80 @@ def _imagem(fig, largura=LARGURA_UTIL):
     return imagem
 
 
+# =====================================================================
+# CASOS POR BAIRRO E AGRAVO (Dengue e Chikungunya)
+# =====================================================================
+def analisar_bairros(df):
+    """Casos por bairro e agravo, do bairro com mais casos para o com menos."""
+    if df is None or df.empty or "Bairro" not in df.columns:
+        return None
+    from modules.camadas_exames import padronizar_bairros
+
+    bairro = padronizar_bairros(df["Bairro"])
+    cruz = pd.crosstab(bairro, df["Tipo_Caso"])
+    principais = [a for a in ("Dengue", "Chikungunya", "Zika") if a in cruz.columns]
+    cruz = cruz[principais + [c for c in cruz.columns if c not in principais]]
+    cruz["Total"] = cruz.sum(axis=1)
+    cruz = cruz.sort_values(["Total"] + principais[:1], ascending=False)
+    agravos = [c for c in cruz.columns if c != "Total"]
+
+    total = int(cruz["Total"].sum())
+    frases = [f"Os <b>{_num(total)} casos</b> estão distribuídos em <b>{len(cruz)} bairros/localidades</b>."]
+    if "Dengue" in cruz.columns and cruz["Dengue"].sum():
+        dengue = cruz["Dengue"].sort_values(ascending=False)
+        top = [(b, int(v)) for b, v in dengue.head(3).items() if v]
+        frases.append("Dengue concentrou-se em " + _lista_pt(
+            [f"<b>{b}</b> ({_num(v)}; {_pct(v, dengue.sum())})" for b, v in top]) + ".")
+    if "Chikungunya" in cruz.columns and cruz["Chikungunya"].sum():
+        chik = cruz["Chikungunya"][cruz["Chikungunya"] > 0].sort_values(ascending=False)
+        frases.append(f"Chikungunya teve <b>{_num(chik.sum())} caso(s)</b>, em " + _lista_pt(
+            [f"<b>{b}</b> ({_num(v)})" for b, v in chik.items()]) + ".")
+    if "Zona Rural" in cruz.index:
+        frases.append(f"\"Zona Rural\" reúne vários povoados ({_num(cruz.at['Zona Rural', 'Total'])} casos).")
+
+    tabela = cruz.reset_index().rename(columns={"index": "Bairro", cruz.index.name or "Bairro": "Bairro"})
+    tabela.columns = ["Bairro"] + list(tabela.columns[1:])
+    return {"cruz": cruz, "agravos": agravos, "tabela": tabela, "texto": " ".join(frases)}
+
+
+def grafico_bairros(analise):
+    """Barras horizontais lado a lado por bairro (uma cor por agravo, as mesmas do painel)."""
+    cruz, agravos = analise["cruz"], analise["agravos"]
+    bairros = list(cruz.index)
+    n = len(bairros)
+    altura_barra = 0.8 / max(len(agravos), 1)
+    fig, ax = plt.subplots(figsize=(8, min(10.5, max(3.0, 0.34 * n + 1.2))))
+    posicoes = range(n)
+    for i, agravo in enumerate(agravos):
+        valores = cruz[agravo].values
+        ys = [p - 0.4 + altura_barra * (i + 0.5) for p in posicoes]
+        barras = ax.barh(ys, valores, height=altura_barra, color=_cor(agravo, i), label=agravo)
+        for barra, valor in zip(barras, valores):
+            if valor:
+                ax.text(barra.get_width(), barra.get_y() + barra.get_height() / 2, f" {_num(valor)}",
+                        va="center", fontsize=7)
+    ax.set_yticks(list(posicoes))
+    ax.set_yticklabels(bairros, fontsize=8)
+    ax.invert_yaxis()
+    maximo = max(int(cruz[agravos].values.max()), 1) if agravos else 1
+    ax.set_xlim(0, maximo * 1.15 + 1)
+    ax.set_xlabel("Casos")
+    ax.grid(axis="x", color="#E8EAED")
+    ax.legend(frameon=False, fontsize=8, loc="lower right")
+    _estilizar(ax)
+    fig.tight_layout()
+    return fig
+
+
+TEXTO_BAIRROS = (
+    "Bairro informado na ficha de notificação. \"Zona Rural\" reúne vários povoados; "
+    "\"(bairro não informado)\" são fichas sem o bairro preenchido."
+)
+
+
 def gerar_pdf(df, populacao, filtros_texto, variaveis, comparacao, incluir_mapa,
-              municipio_gdf=None, ubs_gdf=None, info_dados=None, anos_mapa=None, config_mapa=None):
+              municipio_gdf=None, ubs_gdf=None, info_dados=None, anos_mapa=None, config_mapa=None,
+              incluir_bairros=True):
     info_dados = info_dados or {}
     e = _estilos()
     agora = datetime.now()
@@ -513,9 +585,20 @@ def gerar_pdf(df, populacao, filtros_texto, variaveis, comparacao, incluir_mapa,
         ]
         h.append(KeepTogether(bloco))
 
+    proxima = len(variaveis) + 1
+    analise_b = analisar_bairros(df) if incluir_bairros else None
+    if analise_b is not None:
+        h.append(PageBreak())
+        h.append(Paragraph(f"{proxima}. Casos por bairro (Dengue e Chikungunya)", e["h1"]))
+        h.append(_imagem(grafico_bairros(analise_b)))
+        h.append(Paragraph(analise_b["texto"], e["corpo"]))
+        h.append(_tabela_pdf([list(analise_b["tabela"].columns)] + analise_b["tabela"].astype(str).values.tolist()))
+        h.append(Paragraph(TEXTO_BAIRROS, e["nota"]))
+        proxima += 1
+
     if incluir_mapa:
         h.append(PageBreak())
-        h.append(Paragraph(f"{len(variaveis) + 1}. Mapas de calor por ano", e["h1"]))
+        h.append(Paragraph(f"{proxima}. Mapas de calor por ano", e["h1"]))
         fig_mapas = (figura_comparacao_anos(df, municipio_gdf, ubs_gdf, anos=anos_mapa,
                                             config={**(config_mapa or {}), "mostrar_ubs": False})
                      if anos_mapa is None or len(anos_mapa) else None)
@@ -583,10 +666,11 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
     # nunca entrega um PDF antigo guardado em cache depois de uma atualização.
     @st.cache_data(show_spinner=False, max_entries=8)
     def _pdf_em_cache(_df, assinatura_df, populacao, filtros_itens, variaveis, comparacao, incluir_mapa,
-                      _municipio, _ubs, _info, versao, anos_mapa=None, config_mapa_itens=()):
+                      _municipio, _ubs, _info, versao, anos_mapa=None, config_mapa_itens=(),
+                      incluir_bairros=True):
         return gerar_pdf(_df, populacao, dict(filtros_itens), list(variaveis), comparacao, incluir_mapa,
                          _municipio, _ubs, _info, anos_mapa=list(anos_mapa),
-                         config_mapa=dict(config_mapa_itens))
+                         config_mapa=dict(config_mapa_itens), incluir_bairros=incluir_bairros)
 
     st.header("📑 Relatório personalizado")
     st.caption("Escolha as variáveis. O relatório abaixo se atualiza na hora, junto com os filtros da barra "
@@ -607,6 +691,7 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
         help="Separa cada variável pelas categorias desta (ex.: cada gráfico dividido por Gênero).",
     )
     comparacao = None if comparacao == "Nenhuma" else comparacao
+    incluir_bairros = col_c.checkbox("Incluir casos por bairro", True, key=f"{key_prefix}_bairros")
     incluir_mapa = col_c.checkbox("Incluir mapas de calor", True, key=f"{key_prefix}_mapa")
 
     # ---------- resumo
@@ -633,8 +718,24 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
         st.markdown(analise["texto"].replace("<b>", "**").replace("</b>", "**"))
         st.divider()
 
+    proxima = len(variaveis) + 1
+    analise_b = analisar_bairros(df) if incluir_bairros else None
+    if analise_b is not None:
+        st.subheader(f"{proxima}. Casos por bairro (Dengue e Chikungunya)")
+        col_grafico, col_tabela = st.columns([3, 2])
+        with col_grafico:
+            fig = grafico_bairros(analise_b)
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
+        with col_tabela:
+            st.dataframe(analise_b["tabela"], hide_index=True, use_container_width=True)
+        st.markdown(analise_b["texto"].replace("<b>", "**").replace("</b>", "**"))
+        st.caption(TEXTO_BAIRROS)
+        st.divider()
+        proxima += 1
+
     if incluir_mapa:
-        st.subheader(f"{len(variaveis) + 1}. Mapas de calor por ano")
+        st.subheader(f"{proxima}. Mapas de calor por ano")
         anos_disponiveis = [int(a) for a in sorted(df.dropna(subset=["Latitude", "Longitude"])["Ano"].unique())]
         anos_mapa = st.multiselect(
             "Anos nos mapas", anos_disponiveis, default=anos_disponiveis, key=f"{key_prefix}_anos_mapa",
@@ -664,7 +765,8 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
                                     versao_logos(),
                                     os.path.getmtime(os.path.join(os.path.dirname(os.path.abspath(__file__)), "comparacao_mapas.py"))),
                             anos_mapa=tuple(anos_mapa) if incluir_mapa else (),
-                            config_mapa_itens=tuple(sorted(config_mapa.items())) if incluir_mapa else ())
+                            config_mapa_itens=tuple(sorted(config_mapa.items())) if incluir_mapa else (),
+                            incluir_bairros=incluir_bairros)
     st.download_button(
         "📥 Baixar este relatório em PDF", data=pdf,
         file_name=f"relatorio_pinheiro_{datetime.now():%Y%m%d_%H%M}.pdf",
