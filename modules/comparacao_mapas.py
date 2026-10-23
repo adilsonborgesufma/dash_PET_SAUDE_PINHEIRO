@@ -469,8 +469,76 @@ def _contornos(geometria):
     return aneis
 
 
+def _contagem_por_bairro(df_ano):
+    """[(nome do bairro, lat, lon, casos)] usando os pontos de referência dos bairros
+    (assets/bairros_pinheiro.csv). Bairros fora da tabela (ex.: Zona Rural) ficam de fora."""
+    if "Bairro" not in df_ano.columns or df_ano.empty:
+        return []
+    from modules.bairros import _chave, carregar_referencia_bairros
+
+    referencia = carregar_referencia_bairros()
+    if referencia.empty:
+        return []
+    por_chave = referencia.set_index("chave")
+    chaves = df_ano["Bairro"].dropna().astype(str).map(_chave)
+    contagem = chaves[chaves.isin(por_chave.index)].value_counts()
+    return [(por_chave.at[c, "Bairro"], float(por_chave.at[c, "Latitude"]), float(por_chave.at[c, "Longitude"]), int(n))
+            for c, n in contagem.items()]
+
+
+def _desenhar_nomes_bairros(ax, df_ano, para_tela, largura, altura, tamanho_fonte=5.5):
+    """Escreve 'Bairro · casos' no mapa, do bairro com mais casos para o com menos.
+    Cada nome vai em cima do bairro; se não couber, é colocado ao redor (cada vez mais
+    longe) com uma linha fina até o ponto do bairro, sem cobrir outro nome."""
+    import math as _m
+
+    import matplotlib.patheffects as efeitos
+
+    largura_pol = ax.get_position().width * ax.figure.get_figwidth()
+    unidades_por_ponto = largura / max(largura_pol * 72.0, 1.0)
+    ocupados = []
+
+    def colide(caixa):
+        return any(not (caixa[2] < o[0] or caixa[0] > o[2] or caixa[3] < o[1] or caixa[1] > o[3])
+                   for o in ocupados)
+
+    for nome, lat, lon, n in sorted(_contagem_por_bairro(df_ano), key=lambda r: -r[3]):
+        x0, y0 = para_tela([lon], [lat])
+        x0, y0 = float(x0[0]), float(y0[0])
+        if not (0 <= x0 <= largura and 0 <= y0 <= altura):
+            continue
+        texto = f"{nome} · {n}"
+        mw = len(texto) * tamanho_fonte * 0.58 / 2 * unidades_por_ponto
+        mh = tamanho_fonte * 0.65 * unidades_por_ponto
+        escolhido = None
+        for passo in range(0, 14):
+            raio = passo * mh * 2.4
+            direcoes = [0] if passo == 0 else range(0, 360, 30)
+            for ang in direcoes:
+                x = x0 + raio * _m.cos(_m.radians(ang)) * 1.6
+                y = y0 + raio * _m.sin(_m.radians(ang))
+                caixa = (x - mw, y - mh, x + mw, y + mh)
+                if caixa[0] < 2 or caixa[2] > largura - 2 or caixa[1] < 2 or caixa[3] > altura - 2:
+                    continue
+                if not colide(caixa):
+                    escolhido = (x, y, caixa)
+                    break
+            if escolhido:
+                break
+        if not escolhido:
+            continue
+        x, y, caixa = escolhido
+        ocupados.append(caixa)
+        if (x, y) != (x0, y0):
+            ax.plot([x0, x], [y0, y], color="#374151", linewidth=0.4, zorder=5)
+        ax.scatter([x0], [y0], s=3, color="#111827", zorder=6, linewidths=0)
+        ax.text(x, y, texto, fontsize=tamanho_fonte, fontweight="bold", color="#111827",
+                ha="center", va="center", zorder=7,
+                path_effects=[efeitos.withStroke(linewidth=2.0, foreground="white")])
+
+
 def figura_comparacao_anos(df_base, municipio_gdf, ubs_gdf=None, anos=None, config=None,
-                           por_linha=2, com_fundo=True):
+                           por_linha=2, com_fundo=True, nomes_bairros=True):
     """Figura (matplotlib) com os mapas de calor dos anos escolhidos, lado a lado,
     idêntica à comparação do painel: a régua de cores considera TODOS os anos dos
     dados filtrados (como no painel), mesmo que só alguns anos sejam mostrados."""
@@ -553,6 +621,8 @@ def figura_comparacao_anos(df_base, municipio_gdf, ubs_gdf=None, anos=None, conf
         if cfg["mostrar_ubs"] and ubs:
             ux, uy = para_tela([p[1] for p in ubs], [p[0] for p in ubs])
             ax.scatter(ux, uy, s=26, color=COR_UBS, edgecolor="white", linewidth=0.9, zorder=4)
+        if nomes_bairros:
+            _desenhar_nomes_bairros(ax, df_base[df_base["Ano"] == ano], para_tela, W, H)
         if fundo is not None:
             ax.text(W - 6, H - 6, CREDITO_FUNDO[cfg["fundo"]], fontsize=5.5, color="#374151",
                     ha="right", va="bottom", zorder=5,

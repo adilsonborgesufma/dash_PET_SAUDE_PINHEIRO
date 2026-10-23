@@ -82,7 +82,8 @@ TEXTO_MAPAS_CALOR = (
     "Mesmos mapas da comparação entre anos do painel (aba Mapa Geral). Cada mancha mostra onde os casos "
     "se concentraram: tons frios indicam poucos casos por perto e tons quentes, muitos casos próximos uns "
     "dos outros. Todos os anos usam a mesma escala de cores, então dá para comparar um ano com outro. "
-    "A linha cinza é o limite do município."
+    "Os nomes indicam o bairro e o número de casos do ano; quando os nomes se sobrepõem, aparece o do "
+    "bairro com mais casos. A linha cinza é o limite do município."
 )
 
 # =====================================================================
