@@ -899,8 +899,8 @@ with st.sidebar:
     cluster = st.checkbox("Agrupar UBS", True)
 
     enquadrar_municipio = st.checkbox(
-        "🗺️ Mostrar o município inteiro", False,
-        help="Desmarcado, o mapa abre na área urbana, onde ficam os bairros.",
+        "🗺️ Mostrar o município inteiro", True,
+        help="Enquadra todo o município de Pinheiro. Desmarque para abrir na área urbana com o zoom escolhido.",
     )
     if enquadrar_municipio:
         zoom = 10  # usado só no raio adaptável do mapa de calor
@@ -1099,7 +1099,9 @@ with aba_mapa:
                     maximo=maximo_bolha, rotulo_ano=ano,
                 )
         if mostrar_nomes_bairros and anos_no_mapa:
-            adicionar_nomes_bairros(m, df_mapa)
+            # Vendo o município inteiro os nomes ficariam amontoados: a camada começa
+            # desligada e pode ser ligada no botão de camadas ao aproximar.
+            adicionar_nomes_bairros(m, df_mapa, mostrar=not enquadrar_municipio)
 
         # Mapa de calor IGUAL ao do Passo8 (mesmo Leaflet.heat, raio, desfoque, cores e régua
         # comum), mas o navegador recebe só a contagem por quadradinho de ~150 m (centro do

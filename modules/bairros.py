@@ -126,12 +126,12 @@ def adicionar_bolhas_bairros(mapa, df, cores_agravo, mostrar_nomes=True,
     return dados["Bairro"].nunique()
 
 
-def adicionar_nomes_bairros(mapa, df, nome_camada="🏷️ Nomes dos bairros"):
+def adicionar_nomes_bairros(mapa, df, nome_camada="🏷️ Nomes dos bairros", mostrar=True):
     """Camada só com o nome de cada bairro e o total de casos (anos marcados)."""
     dados = df.dropna(subset=["Latitude", "Longitude"])
     if dados.empty:
         return
-    camada = folium.FeatureGroup(name=nome_camada, show=True)
+    camada = folium.FeatureGroup(name=nome_camada, show=mostrar)
     for bairro, grupo in dados.groupby("Bairro"):
         folium.Marker(
             location=[float(grupo["Latitude"].iloc[0]), float(grupo["Longitude"].iloc[0])],
@@ -167,7 +167,7 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
     from folium.plugins import HeatMap
 
     from modules.calor_suavizado import coordenadas_em_grade, pontos_heatmap
-    from modules.comparacao_mapas import DESLOCAMENTO_REFERENCIA_GRAUS, calcular_pico
+    from modules.comparacao_mapas import DESLOCAMENTO_REFERENCIA_GRAUS, calcular_pico, calcular_zoom
     from modules.camadas_exames import CATEGORIAS_EXAME, adicionar_legenda_camadas, mascara_categoria
 
     nome = next(iter(CATEGORIAS_EXAME))  # "RT-PCR dengue positivo"
@@ -184,10 +184,13 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
         st.info("Marque ao menos um ano na barra lateral.")
         return
 
-    referencia = carregar_referencia_bairros()
-    centro = ([float(referencia["Latitude"].median()), float(referencia["Longitude"].median())]
-              if not referencia.empty else [-2.525, -45.085])
-    zoom = 14
+    # Abre mostrando o município inteiro (como o mapa principal)
+    if municipio_gdf is not None and not municipio_gdf.empty:
+        minx, miny, maxx, maxy = municipio_gdf.to_crs(epsg=4326).total_bounds
+    else:
+        minx, miny, maxx, maxy = -45.36, -2.82, -44.90, -2.17
+    centro = [(miny + maxy) / 2, (minx + maxx) / 2]
+    zoom = int(calcular_zoom((minx, maxx, miny, maxy), 900, altura, 18))
     mapa = folium.Map(location=centro, zoom_start=zoom, tiles="OpenStreetMap", control_scale=True)
     if municipio_gdf is not None and not municipio_gdf.empty:
         folium.GeoJson(
@@ -198,7 +201,8 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
 
     # Mesmo mapa de calor do Passo8, com a contagem por quadradinho de ~150 m (nunca a
     # coordenada real), uma camada por ano, todas com a mesma régua de cores.
-    raio, desfoque = 18, 9
+    raio = max(8, min(60, int(20 * (13 / max(zoom, 1)))))   # mesmo raio adaptável do Passo8
+    desfoque = max(raio // 2, 1)
     grade = coordenadas_em_grade(positivos)
     base = grade[["Ano", "Latitude", "Longitude"]].dropna()
     maximo = calcular_pico(base, centro[1], centro[0], zoom, 900, altura, raio, desfoque) if not base.empty else 1.0
@@ -212,7 +216,7 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
                 gradient=CATEGORIAS_EXAME[nome]["gradiente"]).add_to(camada)
         camada.add_to(mapa)
     contagem = {nome: len(base)}
-    adicionar_nomes_bairros(mapa, no_mapa, nome_camada="🏷️ Bairros (RT-PCR positivos)")
+    adicionar_nomes_bairros(mapa, no_mapa, nome_camada="🏷️ Bairros (RT-PCR positivos)", mostrar=False)
     adicionar_legenda_camadas(mapa, [nome], contagem)
     folium.LayerControl(collapsed=False).add_to(mapa)
     st_folium(mapa, height=altura, use_container_width=True, returned_objects=[],
