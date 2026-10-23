@@ -2,13 +2,13 @@
 Mapa de calor SUAVIZADO para o painel público (Painel_Arboviroses_Pinheiro.py).
 
 As coordenadas reais das notificações são usadas SÓ aqui, no servidor, para calcular
-uma superfície de densidade bem borrada (núcleo gaussiano de ~1 km). O navegador
+uma superfície de densidade borrada (núcleo gaussiano de ~130 m). O navegador
 recebe apenas uma IMAGEM pronta (ImageOverlay), nunca os pontos: dar zoom no mapa
 não revela a localização dos casos, só amplia a imagem borrada.
 
-O valor de cada pixel é aproximadamente o número de casos num raio de ~1 km.
-Todas as camadas de um mesmo tipo (por exemplo, Dengue de 2023 a 2026) usam a mesma
-escala de cores, para comparar os anos.
+O valor de cada pixel é aproximadamente o número de quarteirões com casos num raio de ~250 m, e a cor
+segue a mesma regra do mapa de calor do painel da Vigilância (1 caso amarelo, cerca de
+6 casos próximos vermelho), igual em todos os anos.
 """
 import base64
 import io
@@ -17,8 +17,10 @@ import math
 import folium
 import numpy as np
 
-SIGMA_METROS = 1000    # quanto o calor é "borrado" (desvio padrão do núcleo gaussiano)
-PIXEL_METROS = 60      # resolução da imagem
+SIGMA_METROS = 130     # quanto o calor é "borrado" (desvio padrão do núcleo gaussiano).
+                       # ≈ o calor do Passo8 com zoom na cidade; aumente para proteger mais.
+CELULA_METROS = 120    # como no Leaflet.heat: casos no mesmo quadradinho contam uma vez
+PIXEL_METROS = 40      # resolução da imagem
 OPACIDADE_MAXIMA = 0.85
 
 
@@ -38,10 +40,20 @@ def densidade(lats, lons, limites):
     lats = np.asarray(lats, dtype=float)
     lons = np.asarray(lons, dtype=float)
     ok = np.isfinite(lats) & np.isfinite(lons)
-    contagem, _, _ = np.histogram2d(lats[ok], lons[ok], bins=[ny, nx], range=[[miny, maxy], [minx, maxx]])
+    lats, lons = lats[ok], lons[ok]
+    # Como no Leaflet.heat (painel da Vigilância): vários casos no mesmo quadradinho de
+    # ~120 m viram UMA mancha. Cada quadradinho ocupado entra uma vez, no seu centro.
+    passo_y = CELULA_METROS / 110540
+    passo_x = CELULA_METROS / (111320 * math.cos(math.radians((miny + maxy) / 2)))
+    celulas = np.unique(np.stack([np.floor((lats - miny) / passo_y), np.floor((lons - minx) / passo_x)], axis=1), axis=0)
+    lats = miny + (celulas[:, 0] + 0.5) * passo_y if len(celulas) else lats
+    lons = minx + (celulas[:, 1] + 0.5) * passo_x if len(celulas) else lons
+    contagem, _, _ = np.histogram2d(lats, lons, bins=[ny, nx], range=[[miny, maxy], [minx, maxx]])
     sigma = SIGMA_METROS / PIXEL_METROS
     k = np.arange(-int(4 * sigma), int(4 * sigma) + 1, dtype=float)
     nucleo = np.exp(-(k ** 2) / (2 * sigma ** 2))  # pico 1: um caso isolado vale 1 no centro
+    contagem = contagem.astype(np.float32)
+    nucleo = nucleo.astype(np.float32)
     suave = np.apply_along_axis(lambda v: np.convolve(v, nucleo, mode="same"), 0, contagem)
     suave = np.apply_along_axis(lambda v: np.convolve(v, nucleo, mode="same"), 1, suave)
     return np.flipud(suave)
@@ -76,15 +88,16 @@ def adicionar_imagem_calor(mapa, dens, limites, gradiente, valor_maximo, nome, m
     """Coloca a superfície no mapa como imagem (sem pontos). Áreas sem casos ficam transparentes."""
     if dens is None or not dens.size or float(dens.max()) <= 0:
         return False
-    # Como no mapa de calor do painel da Vigilância (Leaflet.heat): todo caso aparece pelo
-    # menos na cor de 30% da escala; daí até o vermelho conforme os casos se acumulam.
-    bruto = np.clip(dens / max(valor_maximo, 1e-9), 0, 1)
+    # Mesma regra do mapa de calor do painel da Vigilância (Leaflet.heat, opacidade mínima
+    # 0,3): cada caso próximo soma 30% de "calor" — 1 caso = 30%, 3 casos ≈ 66%,
+    # 6 ou mais ≈ vermelho. A escala é em número de casos, igual em todos os anos.
+    # ('valor_maximo' fica só por compatibilidade.)
+    t = np.clip(1.0 - np.power(0.7, dens), 0, 1).astype(np.float32)
     visivel = np.clip(dens / 0.25, 0, 1)          # borda suave onde a densidade tende a zero
-    t = np.clip(0.3 + 0.7 * bruto ** 0.6, 0, 1)
     paleta = _paleta(gradiente)
-    rgba = np.zeros(dens.shape + (4,))
+    rgba = np.zeros(dens.shape + (4,), dtype=np.float32)
     rgba[..., :3] = paleta[(t * 255).astype(int)]
-    rgba[..., 3] = visivel * (0.45 + (OPACIDADE_MAXIMA - 0.45) * bruto ** 0.6)
+    rgba[..., 3] = visivel * np.clip(t * 1.15, 0, OPACIDADE_MAXIMA)
     minx, miny, maxx, maxy = [float(v) for v in limites]
     folium.raster_layers.ImageOverlay(
         image=_png_data_uri(rgba), bounds=[[miny, minx], [maxy, maxx]],

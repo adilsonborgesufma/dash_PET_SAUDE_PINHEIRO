@@ -194,7 +194,7 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
         ).add_to(mapa)
 
     # Calor SUAVIZADO: calculado aqui com as coordenadas reais e enviado só como imagem
-    # borrada (~1 km), uma camada por ano, todas com a mesma escala de cores.
+    # borrada (~200 m), uma camada por ano, todas com a mesma escala de cores.
     reais = (positivos.dropna(subset=["Lat_Real", "Lon_Real"])
              if "Lat_Real" in positivos.columns else positivos.iloc[0:0])
     limites = (tuple(municipio_gdf.to_crs(epsg=4326).total_bounds) if municipio_gdf is not None
@@ -215,7 +215,7 @@ def renderizar_mapa_rtpcr(df_notificacoes, anos_marcados, municipio_gdf, altura=
 
     st.caption(
         f"{len(positivos)} notificação(ões) com RT-PCR de dengue positivo (coluna RTPCRDE) em "
-        f"{', '.join(map(str, anos))}. O calor é uma imagem borrada (cerca de 1 km) calculada a partir "
+        f"{', '.join(map(str, anos))}. O calor é uma imagem borrada (cerca de 200 m) calculada a partir "
         "da localização das notificações, que não é mostrada; os nomes indicam quantos positivos há em "
         "cada bairro. Use o botão de camadas do mapa para ligar e desligar cada ano; todos os anos usam "
         "a mesma escala de cores."

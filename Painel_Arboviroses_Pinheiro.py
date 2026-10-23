@@ -6,7 +6,7 @@ pela população, sem ferir a LGPD:
   - As bolhas e os nomes do mapa ficam no ponto de referência do BAIRRO
     (assets/bairros_pinheiro.csv, editável), nunca no endereço.
   - O mapa de calor é calculado no servidor com a latitude/longitude das notificações
-    e enviado ao navegador só como IMAGEM borrada (~1 km): as coordenadas nunca saem
+    e enviado ao navegador só como IMAGEM borrada (~200 m): as coordenadas nunca saem
     do servidor (modules/calor_suavizado.py).
   - Não há tabela nem CSV caso a caso: só contagens agregadas por bairro, ano e agravo.
   - Não mostra o link da planilha.
@@ -1112,7 +1112,7 @@ with aba_mapa:
             adicionar_nomes_bairros(m, df_mapa)
 
         # Mapa de calor SUAVIZADO: calculado no servidor com as coordenadas reais e enviado
-        # ao navegador só como IMAGEM borrada (~1 km) — os pontos nunca saem do servidor.
+        # ao navegador só como IMAGEM borrada (~200 m) — os pontos nunca saem do servidor.
         # Uma camada por ano (anos marcados), todas com a mesma escala de cores.
         if mostrar_mapa_calor and agravo_calor:
             titulo_calor = agravo_calor
@@ -1199,10 +1199,8 @@ with aba_mapa:
             cores_gradiente = ", ".join(f"{cor} {float(pos) * 100:.0f}%" for pos, cor in paradas.items())
             titulo_calor_legenda = html.escape(agravo_calor + (f" · {ano_calor}" if ano_calor is not None else ""))
             # Marcas da régua em número de casos (a mesma para todos os anos)
-            if pico_calor >= 3:
-                marcas = ["0", str(round(pico_calor / 2)), f"{pico_calor}+"]
-            else:
-                marcas = ["0", f"{pico_calor}+"]
+            # Calor suavizado: 1 caso = amarelo, ~3 = laranja, 6 ou mais casos próximos = vermelho
+            marcas = ["1", "3", "6+"]
             marcas_html = "".join(f"<span>{marca}</span>" for marca in marcas)
             bloco_intensidade = f"""
             <div style="margin-top:8px; padding-top:6px; border-top:1px solid #ddd;">
