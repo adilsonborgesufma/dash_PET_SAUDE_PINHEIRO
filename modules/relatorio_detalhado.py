@@ -523,9 +523,117 @@ TEXTO_BAIRROS = (
 )
 
 
+# =====================================================================
+# DISTRIBUIÇÃO MENSAL POR ANO
+# =====================================================================
+MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+MESES_EXTENSO = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto",
+                 "setembro", "outubro", "novembro", "dezembro"]
+CORES_ANOS = ["#1A73E8", "#F9A825", "#2E7D32", "#C62828", "#6A1B9A", "#00838F", "#8D6E63", "#5F6368"]
+
+
+def _mes_da_data(serie):
+    """Mês (1–12) da data da notificação. Aceita 10/02/23, 10/02/2023, 2023-02-10 e o número
+    de série do Google/Excel; o que não for data vira vazio."""
+    texto = serie.astype(str).str.strip()
+    mes = pd.to_numeric(texto.str.extract(r"^\d{1,2}/(\d{1,2})/\d{2,4}")[0], errors="coerce")
+    iso = pd.to_numeric(texto.str.extract(r"^\d{4}-(\d{1,2})-\d{1,2}")[0], errors="coerce")
+    mes = mes.fillna(iso)
+    numero = pd.to_numeric(texto, errors="coerce")
+    serial = numero.where(numero.between(30000, 80000))
+    mes_serial = (pd.Timestamp("1899-12-30") + pd.to_timedelta(serial, unit="D")).dt.month
+    mes = mes.fillna(mes_serial)
+    return mes.where(mes.between(1, 12))
+
+
+def analisar_meses(df, anos=None):
+    """Casos por mês (linhas) e ano (colunas). O ano é o da aba da planilha, como no resto do
+    relatório; o mês vem da data da notificação."""
+    if df is None or df.empty or "Ano" not in df.columns:
+        return None
+    if "Mes_Notificacao" in df.columns:
+        mes = pd.to_numeric(df["Mes_Notificacao"], errors="coerce")
+    elif "Data" in df.columns:
+        mes = _mes_da_data(df["Data"])
+    else:
+        return None
+    base = pd.DataFrame({"Ano": pd.to_numeric(df["Ano"], errors="coerce"), "Mes": mes})
+    sem_data = int(base["Mes"].isna().sum())
+    base = base.dropna()
+    if anos:
+        base = base[base["Ano"].isin([int(a) for a in anos])]
+    if base.empty:
+        return None
+    base = base.astype(int)
+    cruz = pd.crosstab(base["Mes"], base["Ano"]).reindex(range(1, 13), fill_value=0)
+    anos_lista = [int(a) for a in cruz.columns]
+
+    # No ano corrente, meses que ainda não chegaram ficam vazios (não são "zero casos")
+    hoje = datetime.now()
+    serie_grafico = cruz.astype(float)
+    if hoje.year in anos_lista:
+        serie_grafico.loc[serie_grafico.index > hoje.month, hoje.year] = float("nan")
+
+    frases = []
+    for ano in anos_lista:
+        valores = cruz[ano]
+        total = int(valores.sum())
+        if not total:
+            continue
+        pico = int(valores.idxmax())
+        parcial = " (ano em andamento)" if ano == hoje.year else ""
+        frases.append(f"Em <b>{ano}</b>{parcial}, {_num(total)} casos, com pico em <b>{MESES_EXTENSO[pico - 1]}</b> "
+                      f"({_num(valores.max())}; {_pct(valores.max(), total)} do ano).")
+    totais_mes = cruz.sum(axis=1)
+    if len(anos_lista) > 1 and totais_mes.sum():
+        top = totais_mes.sort_values(ascending=False).head(3)
+        frases.append("Somando os anos, os meses com mais casos foram " + _lista_pt(
+            [f"<b>{MESES_EXTENSO[m - 1]}</b> ({_num(v)})" for m, v in top.items() if v]) + ".")
+    if sem_data:
+        frases.append(f"{_num(sem_data)} caso(s) sem data de notificação válida ficaram fora deste gráfico.")
+
+    tabela = cruz.copy()
+    tabela.index = MESES
+    tabela.loc["Total"] = tabela.sum()
+    tabela.columns = [str(a) for a in tabela.columns]
+    tabela = tabela.reset_index().rename(columns={"index": "Mês"})
+    return {"cruz": cruz, "serie": serie_grafico, "anos": anos_lista, "tabela": tabela,
+            "texto": " ".join(frases), "sem_data": sem_data}
+
+
+def grafico_meses(analise):
+    """Uma linha por ano, de janeiro a dezembro: permite comparar o mesmo mês entre os anos."""
+    serie = analise["serie"]
+    fig, ax = plt.subplots(figsize=(8, 3.8))
+    for i, ano in enumerate(analise["anos"]):
+        valores = serie[ano].values
+        cor = CORES_ANOS[i % len(CORES_ANOS)]
+        ax.plot(range(1, 13), valores, marker="o", markersize=4, linewidth=2, color=cor, label=str(ano))
+        for x, v in zip(range(1, 13), valores):
+            if v == v and v > 0:  # ignora vazio (NaN) e zero
+                ax.annotate(_num(v), (x, v), textcoords="offset points", xytext=(0, 5),
+                            ha="center", fontsize=6.5, color=cor)
+    ax.set_xticks(range(1, 13))
+    ax.set_xticklabels(MESES, fontsize=8)
+    maximo = float(pd.DataFrame(serie).max().max() or 1)
+    ax.set_ylim(0, maximo * 1.18 + 1)
+    ax.set_ylabel("Casos")
+    ax.grid(axis="y", color="#E8EAED")
+    ax.legend(frameon=False, fontsize=8, ncol=min(len(analise["anos"]), 6), loc="upper left")
+    _estilizar(ax)
+    fig.tight_layout()
+    return fig
+
+
+TEXTO_MESES = (
+    "Mês da data de notificação; ano da aba da planilha (como no restante do relatório). "
+    "No ano em andamento, os meses que ainda não chegaram ficam sem ponto."
+)
+
+
 def gerar_pdf(df, populacao, filtros_texto, variaveis, comparacao, incluir_mapa,
               municipio_gdf=None, ubs_gdf=None, info_dados=None, anos_mapa=None, config_mapa=None,
-              incluir_bairros=True):
+              incluir_bairros=True, incluir_meses=True, anos_meses=None):
     info_dados = info_dados or {}
     e = _estilos()
     agora = datetime.now()
@@ -586,6 +694,17 @@ def gerar_pdf(df, populacao, filtros_texto, variaveis, comparacao, incluir_mapa,
         h.append(KeepTogether(bloco))
 
     proxima = len(variaveis) + 1
+    analise_m = analisar_meses(df, anos_meses) if incluir_meses else None
+    if analise_m is not None:
+        h.append(KeepTogether([
+            Paragraph(f"{proxima}. Distribuição mensal por ano", e["h1"]),
+            _imagem(grafico_meses(analise_m)),
+            Paragraph(analise_m["texto"], e["corpo"]),
+        ]))
+        h.append(_tabela_pdf([list(analise_m["tabela"].columns)] + analise_m["tabela"].astype(str).values.tolist()))
+        h.append(Paragraph(TEXTO_MESES, e["nota"]))
+        proxima += 1
+
     analise_b = analisar_bairros(df) if incluir_bairros else None
     if analise_b is not None:
         h.append(PageBreak())
@@ -667,10 +786,11 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
     @st.cache_data(show_spinner=False, max_entries=8)
     def _pdf_em_cache(_df, assinatura_df, populacao, filtros_itens, variaveis, comparacao, incluir_mapa,
                       _municipio, _ubs, _info, versao, anos_mapa=None, config_mapa_itens=(),
-                      incluir_bairros=True):
+                      incluir_bairros=True, incluir_meses=True, anos_meses=()):
         return gerar_pdf(_df, populacao, dict(filtros_itens), list(variaveis), comparacao, incluir_mapa,
                          _municipio, _ubs, _info, anos_mapa=list(anos_mapa),
-                         config_mapa=dict(config_mapa_itens), incluir_bairros=incluir_bairros)
+                         config_mapa=dict(config_mapa_itens), incluir_bairros=incluir_bairros,
+                         incluir_meses=incluir_meses, anos_meses=list(anos_meses))
 
     st.header("📑 Relatório personalizado")
     st.caption("Escolha as variáveis. O relatório abaixo se atualiza na hora, junto com os filtros da barra "
@@ -691,6 +811,7 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
         help="Separa cada variável pelas categorias desta (ex.: cada gráfico dividido por Gênero).",
     )
     comparacao = None if comparacao == "Nenhuma" else comparacao
+    incluir_meses = col_c.checkbox("Incluir distribuição mensal", True, key=f"{key_prefix}_meses")
     incluir_bairros = col_c.checkbox("Incluir casos por bairro", True, key=f"{key_prefix}_bairros")
     incluir_mapa = col_c.checkbox("Incluir mapas de calor", True, key=f"{key_prefix}_mapa")
 
@@ -719,6 +840,30 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
         st.divider()
 
     proxima = len(variaveis) + 1
+    anos_meses = []
+    if incluir_meses:
+        st.subheader(f"{proxima}. Distribuição mensal por ano")
+        anos_com_casos = [int(a) for a in sorted(pd.to_numeric(df["Ano"], errors="coerce").dropna().unique())]
+        anos_meses = st.multiselect(
+            "Anos no gráfico mensal", anos_com_casos, default=anos_com_casos, key=f"{key_prefix}_anos_meses",
+            help="Cada ano é uma linha: compare o mesmo mês entre os anos.",
+        )
+        analise_m = analisar_meses(df, anos_meses) if anos_meses else None
+        if analise_m is not None:
+            col_grafico, col_tabela = st.columns([3, 2])
+            with col_grafico:
+                fig = grafico_meses(analise_m)
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
+            with col_tabela:
+                st.dataframe(analise_m["tabela"], hide_index=True, use_container_width=True)
+            st.markdown(analise_m["texto"].replace("<b>", "**").replace("</b>", "**"))
+            st.caption(TEXTO_MESES)
+        else:
+            st.info("Escolha pelo menos um ano com casos datados para ver a distribuição mensal.")
+        st.divider()
+        proxima += 1
+
     analise_b = analisar_bairros(df) if incluir_bairros else None
     if analise_b is not None:
         st.subheader(f"{proxima}. Casos por bairro (Dengue e Chikungunya)")
@@ -766,7 +911,8 @@ def renderizar_aba_relatorio(df, populacao, filtros_texto, municipio_gdf=None, u
                                     os.path.getmtime(os.path.join(os.path.dirname(os.path.abspath(__file__)), "comparacao_mapas.py"))),
                             anos_mapa=tuple(anos_mapa) if incluir_mapa else (),
                             config_mapa_itens=tuple(sorted(config_mapa.items())) if incluir_mapa else (),
-                            incluir_bairros=incluir_bairros)
+                            incluir_bairros=incluir_bairros, incluir_meses=incluir_meses,
+                            anos_meses=tuple(anos_meses) if incluir_meses else ())
     st.download_button(
         "📥 Baixar este relatório em PDF", data=pdf,
         file_name=f"relatorio_pinheiro_{datetime.now():%Y%m%d_%H%M}.pdf",

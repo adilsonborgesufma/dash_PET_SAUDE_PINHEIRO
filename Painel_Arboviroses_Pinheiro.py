@@ -281,7 +281,12 @@ def padronizar_df_casos(df):
     # Mantém SOMENTE as colunas do dashboard. Endereço, bairro, nº da ficha,
     # escolaridade etc. são descartados aqui e não chegam ao mapa nem às exportações.
     # O bairro é mantido só para o ranking de bairros prioritários (contagem agregada).
-    manter = [c for c in list(COLUNAS_EXIBICAO) + ["Faixa_Etaria", "Classificacao", "Bairro", "Lat_Real", "Lon_Real"]
+    # Da data da notificação fica só o MÊS, para o gráfico mensal da aba Relatório.
+    if "Data" in df.columns:
+        from modules.relatorio_detalhado import _mes_da_data
+        df["Mes_Notificacao"] = _mes_da_data(df["Data"])
+    manter = [c for c in list(COLUNAS_EXIBICAO) + ["Faixa_Etaria", "Classificacao", "Bairro", "Lat_Real", "Lon_Real",
+                                                   "Mes_Notificacao"]
               if c in df.columns]
     df = df[manter]
 
